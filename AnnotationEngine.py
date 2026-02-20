@@ -37,7 +37,7 @@ class AnnotationEngine():
 
 
 # Example use case
-# annotation_engine = AnnotationEngine(frame_list)
+annotation_engine = AnnotationEngine(frame_list)
 
 
 
