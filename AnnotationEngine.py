@@ -18,8 +18,10 @@ class AnnotationEngine():
         # Create variables
         self.video_path = video_path
 
-        # Call preAnnotation
+    def run(self):
         self.preAnnotation()
+        self.inAnnotation()
+        self.postAnnotation()
 
     # Exocentric frames -> modified frames
     # Inpainting to remove human, most likely through ROSE
@@ -28,16 +30,10 @@ class AnnotationEngine():
         human_masks = DataraAI_segmentation.mask_generation(self.video_path)
         # rose inpainting will take in video path and human masks (or similar)
 
-        # Then call inAnnotation
-        self.inAnnotation()
-
     # Modified frames -> ego frames
     def inAnnotation(self):
         # inAnnotation steps go here
         # ...
-
-        # Then call postAnnotation
-        self.postAnnotation()
 
     # Egocentric frames -> extracting details about the frames
     def postAnnotation(self):
@@ -50,6 +46,6 @@ class AnnotationEngine():
 
 # Example use case
 annotation_engine = AnnotationEngine(video_path)
-
+annotation_engine.run()
 
 
