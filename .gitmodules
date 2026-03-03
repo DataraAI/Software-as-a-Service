@@ -1,0 +1,3 @@
+[submodule "Inpainting/ROSE"]
+	path = Inpainting/ROSE
+	url = git@github.com:Kunbyte-AI/ROSE.git
