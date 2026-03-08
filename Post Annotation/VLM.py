@@ -1,5 +1,9 @@
-pip install git+https://github.com/huggingface/transformers accelerate
-pip install qwen-vl-utils[decord]==0.0.8
+# pip install git+https://github.com/huggingface/transformers accelerate
+# pip install qwen-vl-utils[decord]==0.0.8
+
+# Since the Lambda VM is aarch64, ignore the previous pip command and replace with this:
+# pip install qwen-vl-utils
+
 
 import torch
 from PIL import Image
