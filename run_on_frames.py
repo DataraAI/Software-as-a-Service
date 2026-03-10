@@ -13,8 +13,20 @@ Usage:
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
+# Use local packages: packages/ for lerobot & lingbot_vla, packages/lingbot_vla/ for lingbotvla.
+_repo_root = Path(__file__).resolve().parent
+_packages = _repo_root / "packages"
+_lerobot_root = _packages / "lerobot"
+_lingbot_vla_root = _packages / "lingbot_vla"
+if _packages.is_dir() and str(_packages) not in sys.path:
+    sys.path.insert(0, str(_packages))
+if _lerobot_root.is_dir() and str(_lerobot_root) not in sys.path:
+    sys.path.insert(0, str(_lerobot_root))
+if _lingbot_vla_root.is_dir() and str(_lingbot_vla_root) not in sys.path:
+    sys.path.insert(0, str(_lingbot_vla_root))
 
 import numpy as np
 from tqdm import tqdm
@@ -122,7 +134,7 @@ def main():
     frames = load_frames_from_video(args.video_path)
     print(f"Loaded {len(frames)} frames from {args.video_path}")
 
-    from .lingbot_robotwin_policy import QwenPiServer
+    from packages.lingbot_vla.deploy.lingbot_robotwin_policy import QwenPiServer
 
     server = QwenPiServer(
         path_to_pi_model=args.model_path,
