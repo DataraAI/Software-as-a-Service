@@ -1,3 +1,29 @@
+"""
+Stub xformers.ops before any diffusers import to avoid triton compatibility errors
+(JITCallable._set_src / 'Cannot set attribute src directly' with PyTorch 2.7+).
+"""
+import importlib.util
+import sys
+import types
+
+_xformers = types.ModuleType("xformers")
+_xformers_ops = types.ModuleType("xformers.ops")
+_xformers.__spec__ = importlib.util.spec_from_loader("xformers", None, is_package=True)
+_xformers_ops.__spec__ = importlib.util.spec_from_loader("xformers.ops", None, is_package=False)
+
+
+def _memory_efficient_attention_fallback(query, key, value, attn_bias=None, op=None, scale=None, **kwargs):
+    import torch.nn.functional as F
+    return F.scaled_dot_product_attention(
+        query, key, value, attn_mask=attn_bias, dropout_p=kwargs.get("p", 0.0), scale=scale
+    )
+
+
+_xformers_ops.memory_efficient_attention = _memory_efficient_attention_fallback
+_xformers.ops = _xformers_ops
+sys.modules["xformers"] = _xformers
+sys.modules["xformers.ops"] = _xformers_ops
+
 import argparse
 import os
 from urllib.parse import urlparse
@@ -181,7 +207,7 @@ def main(argv=None):
     parser.add_argument("--maskURL", type=str, default=None)
     parser.add_argument("--mask_path", type=str, default=None)
     parser.add_argument("--mask_preset", type=str, default=None)
-    parser.add_argument("--out_root", type=str, default="corner_images_controlnet")
+    parser.add_argument("--out_root", type=str, default=os.path.expanduser("~/corner_images_controlnet"))
 
     args, _ = parser.parse_known_args(argv)
     prompt = args.prompt
@@ -302,10 +328,10 @@ def main(argv=None):
         else:
             blob_output_dir_components = [container_name, "corner_cases"]
 
-    imageFilepath = os.path.abspath(args.out_root)
-    imageFilepath += "/" + "/".join(blob_output_dir_components)
+    out_root = os.path.expanduser(args.out_root)
+    imageFilepath = os.path.join(out_root, *blob_output_dir_components)
     os.makedirs(imageFilepath, exist_ok=True)
-    imageFilepath += "/" + new_filename
+    imageFilepath = os.path.join(imageFilepath, new_filename)
 
     image.save(imageFilepath)
     print(imageFilepath)
