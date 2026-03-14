@@ -2,15 +2,27 @@ from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, Auto
 from qwen_vl_utils import process_vision_info
 
 import argparse
+import json
+import os
 import torch
+import requests
+import nltk
+for resource in ("punkt", "punkt_tab", "stopwords"):
+    try:
+        if resource == "stopwords":
+            nltk.data.find("corpora/stopwords")
+        else:
+            nltk.data.find(f"tokenizers/{resource}")
+    except LookupError:
+        nltk.download(resource, quiet=True)
 
 """
-Example usage (inputting orig URL for testing purposes):
+Example usage:
 
-python Post\\ Annotation/qwen_vlm_image.py \
-    --prompt "Describe the image." \
-    --egoURL "https://datara04749.blob.core.windows.net/roboteyeview/automotive/bmw/frontGrille/orig/frontGrille_000.png"
-
+  # From URL (requires network access to the host):
+  python Post\\ Annotation/qwen_vlm_image.py \\
+    --prompt "Describe the image." \\
+    --egoURL "https://daasblob.blob.core.windows.net/roboteyeview/carAutomation/BMW/frontGrille/egos/frontGrille_016_Rotate_right_90_degrees.png"
 """
 
 
@@ -30,17 +42,17 @@ if "?" in egoURL:
 
 
 # default: Load the model on the available device(s)
-# model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-#     "Qwen/Qwen2.5-VL-3B-Instruct", torch_dtype="auto", device_map="auto"
-# )
+model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+    "Qwen/Qwen2.5-VL-3B-Instruct", torch_dtype="auto", device_map="auto"
+)
 
 # We recommend enabling flash_attention_2 for better acceleration and memory saving, especially in multi-image and video scenarios.
-model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-    "Qwen/Qwen2.5-VL-3B-Instruct",
-    torch_dtype=torch.bfloat16,
-    attn_implementation="flash_attention_2",
-    device_map="auto",
-)
+# model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+#     "Qwen/Qwen2.5-VL-3B-Instruct",
+#     torch_dtype=torch.bfloat16,
+#     attn_implementation="flash_attention_2",
+#     device_map="auto",
+# )
 
 # default processer
 processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
@@ -65,10 +77,19 @@ messages = [
 ]
 
 # Preparation for inference
+# egoURL can be an https URL or a local path; qwen_vl_utils accepts both.
 text = processor.apply_chat_template(
     messages, tokenize=False, add_generation_prompt=True
 )
-image_inputs, video_inputs = process_vision_info(messages)
+try:
+    image_inputs, video_inputs = process_vision_info(messages)
+except (OSError, requests.exceptions.RequestException) as e:
+    if isinstance(egoURL, str) and (egoURL.startswith("http://") or egoURL.startswith("https://")):
+        raise SystemExit(
+            "Failed to fetch image from URL (host unreachable or DNS error). "
+            "Use a local path instead, e.g. --egoURL /path/to/image.png"
+        ) from e
+    raise
 inputs = processor(
     text=[text],
     images=image_inputs,
@@ -86,4 +107,27 @@ generated_ids_trimmed = [
 output_text = processor.batch_decode(
     generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
 )
-print(output_text)
+
+# Extract keywords from VLM output using NLTK
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+
+stop_words = set(stopwords.words("english"))
+combined_text = " ".join(output_text) if isinstance(output_text, list) else output_text
+tokens = word_tokenize(combined_text.lower())
+keywords = [
+    t for t in tokens
+    if t.isalnum() and len(t) > 1 and t not in stop_words
+]
+# Preserve order, remove duplicates (first occurrence kept)
+seen = set()
+vlm_tags = []
+for k in keywords:
+    if k not in seen:
+        seen.add(k)
+        vlm_tags.append(k)
+
+schema_output = {"VLM_tags": vlm_tags}
+with open(os.path.expanduser("~") + "/vlm_tags.json", "w") as f:
+    json.dump(schema_output, f, indent=2)
+print(os.path.expanduser("~") + "/vlm_tags.json")
