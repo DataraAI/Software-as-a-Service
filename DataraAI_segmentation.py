@@ -1,3 +1,9 @@
+import argparse
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
+
 from packages.sam3.sam3.model_builder import build_sam3_video_predictor
 
 def propagate_in_video(predictor, session_id):
@@ -9,6 +15,7 @@ def propagate_in_video(predictor, session_id):
             session_id=session_id,
         )
     ):
+        # response["outputs"] keys: 'out_obj_ids', 'out_probs', 'out_boxes_xywh', 'out_binary_masks', 'frame_stats'
         outputs_per_frame[response["frame_index"]] = response["outputs"]
 
     return outputs_per_frame
@@ -33,8 +40,6 @@ def mask_generation(video_path: str, segment: str = "humans"):
         )
     )
 
-    # output keys: 'out_obj_ids', 'out_probs', 'out_boxes_xywh', 'out_binary_masks', 'frame_stats'
-    output = response["outputs"]
     outputs_per_frame = propagate_in_video(video_predictor, session_id)
 
     _ = video_predictor.handle_request(
@@ -46,3 +51,38 @@ def mask_generation(video_path: str, segment: str = "humans"):
     video_predictor.shutdown()
 
     return outputs_per_frame
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--video_path", type=str, help="video_path")
+    parser.add_argument("--segment", type=str, help="segment")
+    
+    args = parser.parse_args()
+    video_path = args.video_path
+    segment = args.segment
+    if not video_path.endswith(".mp4"):
+        raise ValueError("Video path must end with .mp4")
+        exit(1)
+
+    outputs_per_frame = mask_generation(video_path, segment)
+
+    out_dir = Path.home() / "masks" / video_path.split("/")[-1].split(".")[0]
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    n_digits = len(str(len(outputs_per_frame)))
+
+    for frame_index, output in outputs_per_frame.items():
+        masks = output["out_binary_masks"]
+        obj_ids = output["out_obj_ids"]
+        for i in range(len(masks)):
+            mask = masks[i]
+            oid = obj_ids[i]
+            arr = (mask.astype(np.uint8)) * 255
+            oid_dir = out_dir / str(int(oid))
+            oid_dir.mkdir(parents=True, exist_ok=True)
+            path = oid_dir / f"frame_{frame_index:0{n_digits}d}.png"
+            Image.fromarray(arr, mode="L").save(path)
+
+
+if __name__ == "__main__":
+    main()
