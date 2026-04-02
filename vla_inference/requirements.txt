@@ -1,0 +1,25 @@
+# requirements.txt — VLA Inference SaaS
+#
+# ALWAYS required:
+Pillow>=10.0.0
+
+# Required for video input (--video_path):
+opencv-python>=4.8.0
+
+# Required for SmolVLA backend (--backend smolvla):
+# torch>=2.0.0
+# torchvision>=0.15.0
+# lerobot @ git+https://github.com/huggingface/lerobot.git
+# transformers>=4.40.0
+# huggingface-hub>=0.22.0
+
+# Required for OpenVLA backend (--backend openvla):
+# torch>=2.0.0
+# transformers>=4.40.0
+# huggingface-hub>=0.22.0
+
+# Notes:
+# - mock backend requires only Pillow (and opencv-python if using --video_path)
+# - SmolVLA requires lerobot which is not on PyPI — install from GitHub
+# - OpenVLA requires ~14GB GPU VRAM
+# - GR00T requires NVIDIA GPU + Isaac Sim setup (see NVIDIA docs)
