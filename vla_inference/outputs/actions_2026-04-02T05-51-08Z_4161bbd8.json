@@ -1,0 +1,53 @@
+{
+  "run_id": "2026-04-02T05-51-08Z_4161bbd8",
+  "input": {
+    "video_path": null,
+    "image_dir": "../sample_images",
+    "task": "open the file menu"
+  },
+  "backend": "mock",
+  "model_id": "mock",
+  "actions": [
+    {
+      "frame_index": 0,
+      "timestamp": 0.0,
+      "action": {
+        "action_type": "WAIT",
+        "seconds": 1.0
+      }
+    },
+    {
+      "frame_index": 1,
+      "timestamp": 0.5,
+      "action": {
+        "action_type": "CLICK",
+        "x": 412,
+        "y": 88
+      }
+    },
+    {
+      "frame_index": 2,
+      "timestamp": 1.0,
+      "action": {
+        "action_type": "TYPE",
+        "text": "hello from mock VLA"
+      }
+    },
+    {
+      "frame_index": 3,
+      "timestamp": 1.5,
+      "action": {
+        "action_type": "PRESS",
+        "key": "enter"
+      }
+    },
+    {
+      "frame_index": 4,
+      "timestamp": 2.0,
+      "action": {
+        "action_type": "SCROLL",
+        "amount": -3.0
+      }
+    }
+  ]
+}
