@@ -1,0 +1,12 @@
+{
+  "episode_id": "sample-episode-001",
+  "task_name": "insert_battery",
+  "instruction": "Pick the battery from the tray, align it with the compartment, insert it carefully, then inspect the fit.",
+  "asset_path": "sample_frame_001.ppm",
+  "state": [
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+  ]
+}

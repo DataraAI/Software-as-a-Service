@@ -1,0 +1,29 @@
+{
+  "episodes": [
+    {
+      "episode_id": "sample-workflow-001",
+      "expected_steps": [
+        {
+          "step_index": 0,
+          "description": "pick the battery",
+          "action_label": "pick"
+        },
+        {
+          "step_index": 1,
+          "description": "align the battery with the slot",
+          "action_label": "align"
+        },
+        {
+          "step_index": 2,
+          "description": "insert the battery",
+          "action_label": "insert"
+        },
+        {
+          "step_index": 3,
+          "description": "inspect the fit",
+          "action_label": "inspect"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "episode_id": "sample-episode-image-001",
+  "task_name": "pick_and_place_demo",
+  "instruction": "Pick the block, place it on the marked area, then inspect the placement.",
+  "asset_path": "sample_frame_001.ppm",
+  "state": [
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+  ]
+}

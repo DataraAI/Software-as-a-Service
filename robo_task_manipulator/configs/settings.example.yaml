@@ -1,0 +1,33 @@
+ingestion:
+  video_frame_stride: 15
+  max_frames: 24
+  prefer_visual_change: true
+  visual_change_threshold: 0.18
+
+segmentation:
+  frames_per_segment: 4
+  use_visual_change_breaks: true
+  visual_change_threshold: 0.18
+
+semantic:
+  backend: blip
+  model_id: Salesforce/blip-image-captioning-base
+  device: cpu
+  strict: false
+
+action_backend:
+  backend: none
+  model_id: lerobot/pi0_base
+  checkpoint_path: null
+  device: cpu
+  dtype: float32
+  offline: false
+  revision: null
+  cache_dir: null
+  strict: true
+
+export:
+  include_raw_debug: true
+  manifest_name: dataset_manifest.json
+  evaluation_json_name: evaluation_report.json
+  evaluation_csv_name: evaluation_report.csv

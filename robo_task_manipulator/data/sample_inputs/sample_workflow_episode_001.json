@@ -1,0 +1,32 @@
+{
+  "episode_id": "sample-workflow-001",
+  "task_name": "battery_insert_sequence",
+  "instruction": "Pick the battery, align it with the slot, insert it, then inspect the fit.",
+  "metadata": {
+    "source": "sample_frame_sequence",
+    "collision_risk": false
+  },
+  "frames": [
+    {
+      "frame_id": "frame-000",
+      "asset_ref": "sample_frame_001.ppm",
+      "frame_index": 0,
+      "timestamp_s": 0.0,
+      "state": [0.0, 0.0, 0.0, 0.0]
+    },
+    {
+      "frame_id": "frame-001",
+      "asset_ref": "sample_frame_002.ppm",
+      "frame_index": 1,
+      "timestamp_s": 0.5,
+      "state": [0.1, 0.0, 0.0, 0.2]
+    },
+    {
+      "frame_id": "frame-002",
+      "asset_ref": "sample_frame_003.ppm",
+      "frame_index": 2,
+      "timestamp_s": 1.0,
+      "state": [0.15, 0.02, 0.01, -0.1]
+    }
+  ]
+}
