@@ -8,3 +8,15 @@ packages/*
 # py cache
 __pycache__
 
+# Python environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
