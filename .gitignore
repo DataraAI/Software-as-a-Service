@@ -7,11 +7,15 @@ packages/*
 
 # py cache
 __pycache__
+*.pyc
+*.pyo
+*.pyd
 
 # Python environments
 .venv/
 venv/
 env/
+ENV/
 
 # Python cache
 __pycache__/
