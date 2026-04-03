@@ -20,13 +20,40 @@ KNOWN ISSUES:
 If SmolVLA doesn't load, use --backend mock for demos.
 """
 
+import importlib
 import logging
+import os
+import sys
+import types
 from PIL import Image
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_ID = "lerobot/smolvla_base"
+
+# LeRobot batch keys (same as lerobot.utils.constants)
+_OBS_STATE = "observation.state"
+_OBS_LANGUAGE_TOKENS = "observation.language.tokens"
+_OBS_LANGUAGE_ATTENTION_MASK = "observation.language.attention_mask"
+
+
+def _import_smolvla_policy():
+    """
+    Load SmolVLAPolicy without importing lerobot.policies.__init__.
+
+    That __init__ eagerly imports Groot and transitively diffusers/xformers, which can
+    fail (e.g. xformers vs triton) even when only SmolVLA is needed.
+    """
+    import lerobot
+
+    pkg = "lerobot.policies"
+    if pkg not in sys.modules:
+        stub = types.ModuleType(pkg)
+        stub.__path__ = [os.path.join(os.path.dirname(lerobot.__file__), "policies")]
+        sys.modules[pkg] = stub
+    mod = importlib.import_module("lerobot.policies.smolvla.modeling_smolvla")
+    return mod.SmolVLAPolicy
 
 
 class SmolVLAAdapter:
@@ -44,24 +71,25 @@ class SmolVLAAdapter:
     def _load_model(self):
         """Load SmolVLA model and processor from HuggingFace or local path."""
         try:
-            # lerobot provides SmolVLA under lerobot.common.policies.smolvla
-            from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
-            from lerobot.common.policies.smolvla.configuration_smolvla import SmolVLAConfig
-
-            logger.info(f"Loading SmolVLA from: {self.model_id}")
-            self.policy = SmolVLAPolicy.from_pretrained(self.model_id)
-            self.policy.eval()
-            logger.info("SmolVLA loaded successfully")
-
+            SmolVLAPolicy = _import_smolvla_policy()
         except ImportError:
             raise ImportError(
                 "lerobot is required for SmolVLA. Install with:\n"
                 "  pip install lerobot\n"
                 "Or see: https://github.com/huggingface/lerobot\n"
                 "Use --backend mock if you don't need a real VLA."
-            )
+            ) from None
+
+        try:
+            logger.info(f"Loading SmolVLA from: {self.model_id}")
+            self.policy = SmolVLAPolicy.from_pretrained(self.model_id)
+            self.policy.eval()
+            self._vl_tokenizer = self.policy.model.vlm_with_expert.processor.tokenizer
+            logger.info("SmolVLA loaded successfully")
+        except ImportError:
+            raise
         except Exception as e:
-            raise RuntimeError(f"Failed to load SmolVLA model '{self.model_id}': {e}")
+            raise RuntimeError(f"Failed to load SmolVLA model '{self.model_id}': {e}") from e
 
     def predict(self, image: Image.Image, task: str, frame_index: int) -> Any:
         """
@@ -75,34 +103,44 @@ class SmolVLAAdapter:
         Returns:
             Raw action array (numpy or list) — decoded by decoder.decode_smolvla()
 
-        Note: SmolVLA expects observations in a specific format (batch dict).
-        This is a simplified single-frame wrapper. For proper temporal context,
-        you would maintain a rolling observation buffer across frames.
+        Note: Observation keys and shapes come from the checkpoint's config (e.g. smolvla_base
+        uses observation.images.camera1/2/3). A single input frame is broadcast to every camera
+        key so video frames still drive inference. Language is tokenized; task length is capped
+        by the checkpoint's tokenizer_max_length (48 for smolvla_base).
         """
         import torch
         import numpy as np
         from torchvision import transforms
 
-        # Build a minimal observation dict matching SmolVLA's expected format
-        # SmolVLA typically expects: image tensor, language instruction, robot state
-        transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225]),
-        ])
+        cfg = self.policy.config
+        device = next(self.policy.parameters()).device
 
-        img_tensor = transform(image).unsqueeze(0)  # (1, 3, 224, 224)
+        # Float in [0, 1] — policy prepare_images maps to [-1, 1] for SigLIP (no ImageNet norm).
+        img = transforms.ToTensor()(image.convert("RGB"))
+        if img.shape[0] > 3:
+            img = img[:3]
+        img = img.unsqueeze(0).to(device=device, dtype=torch.float32)
 
-        # Minimal observation dict — SmolVLA may require additional keys
-        # depending on which checkpoint is loaded. Adjust as needed.
-        observation = {
-            "observation.images.top": img_tensor,
-            "observation.state": torch.zeros(1, 7),  # dummy robot state
-        }
+        observation = {}
+        for cam_key in cfg.image_features:
+            observation[cam_key] = img
 
-        # Language instruction is typically passed via the policy config
-        # or as a separate input depending on the SmolVLA variant
+        rs = cfg.robot_state_feature
+        state_dim = int(rs.shape[0]) if rs is not None else 6
+        observation[_OBS_STATE] = torch.zeros(1, state_dim, device=device, dtype=torch.float32)
+
+        enc = self._vl_tokenizer(
+            task,
+            max_length=cfg.tokenizer_max_length,
+            truncation=True,
+            padding="max_length",
+            return_tensors="pt",
+        )
+        observation[_OBS_LANGUAGE_TOKENS] = enc["input_ids"].to(device)
+        observation[_OBS_LANGUAGE_ATTENTION_MASK] = enc["attention_mask"].to(
+            device=device, dtype=torch.bool
+        )
+
         with torch.no_grad():
             action = self.policy.select_action(observation)
 
