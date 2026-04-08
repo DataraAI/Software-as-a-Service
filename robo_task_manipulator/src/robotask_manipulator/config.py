@@ -41,9 +41,10 @@ class SegmentationSettings:
 class SemanticSettings:
     """Settings for semantic step understanding."""
 
-    backend: str = "blip"
-    model_id: str = "Salesforce/blip-image-captioning-base"
+    backend: str = "multimodal_vlm"
+    model_id: str = "HuggingFaceTB/SmolVLM-256M-Instruct"
     device: str = "cpu"
+    offline: bool = False
     strict: bool = False
 
 
@@ -141,6 +142,10 @@ def load_settings(config_path: str | Path | None = None) -> AppSettings:
             backend=semantic_backend,
             model_id=semantic_model_id,
             device=os.getenv("RTM_SEMANTIC_DEVICE", semantic_cfg.get("device", SemanticSettings.device)),
+            offline=_parse_bool(
+                os.getenv("RTM_SEMANTIC_OFFLINE", semantic_cfg.get("offline")),
+                default=SemanticSettings.offline,
+            ),
             strict=_parse_bool(os.getenv("RTM_SEMANTIC_STRICT", semantic_cfg.get("strict")), default=SemanticSettings.strict),
         ),
         action_backend=ActionBackendSettings(

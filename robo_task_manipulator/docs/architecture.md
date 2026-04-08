@@ -14,8 +14,8 @@ RoboTaskManipulator is organized by product responsibility, not by abstract pipe
 - owns fixed-window and visual-change heuristics
 - outputs ordered segment skeletons
 
-### `understanding/`
-- owns semantic step understanding
+### `task_understanding/`
+- owns segment-level task understanding
 - owns the semantic backend abstraction
 - owns conservative symbolic labeling
 
@@ -56,8 +56,8 @@ RoboTaskManipulator is organized by product responsibility, not by abstract pipe
 
 1. `ingestion/` converts media into a canonical ordered episode.
 2. `segmentation/` splits that episode into candidate steps.
-3. `understanding/` produces semantic step descriptions.
-4. `understanding/labeling.py` converts semantics into conservative symbolic actions.
+3. `task_understanding/` produces semantic step descriptions from ordered frames within a segment.
+4. `task_understanding/labeling.py` converts semantics into conservative symbolic actions.
 5. `action_backend/` optionally adds robot-oriented action proposals.
 6. `context/` adds lightweight tags.
 7. `graph/` links the sequence.
@@ -67,7 +67,7 @@ RoboTaskManipulator is organized by product responsibility, not by abstract pipe
 
 ## Practical Design Choices
 
-- Semantic understanding is the primary source of step meaning in v1.
+- Segment-level task understanding is the primary source of step meaning in v1.
 - `pi0` is optional and used for action proposals, not as the main semantic engine.
 - Segmentation is intentionally simple and deterministic.
 - Context/failure tagging is heuristic and explicit about confidence.

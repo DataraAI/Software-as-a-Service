@@ -10,9 +10,10 @@ segmentation:
   visual_change_threshold: 0.18
 
 semantic:
-  backend: blip
-  model_id: Salesforce/blip-image-captioning-base
+  backend: multimodal_vlm
+  model_id: HuggingFaceTB/SmolVLM-256M-Instruct
   device: cpu
+  offline: false
   strict: false
 
 action_backend:

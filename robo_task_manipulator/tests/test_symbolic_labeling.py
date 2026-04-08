@@ -7,7 +7,7 @@ from robotask_manipulator.schemas import (
     SemanticStep,
     SymbolicActionLabel,
 )
-from robotask_manipulator.understanding import SymbolicActionLabeler
+from robotask_manipulator.task_understanding import SymbolicActionLabeler
 
 
 def _segment(description: str) -> SegmentAnnotation:

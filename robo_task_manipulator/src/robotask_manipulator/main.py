@@ -15,7 +15,11 @@ from robotask_manipulator.ingestion import MediaIngestor
 from robotask_manipulator.schemas import BenchmarkEpisode, DatasetManifest, EpisodeInput, EpisodeOutput
 from robotask_manipulator.segmentation import Segmenter
 from robotask_manipulator.simulation import IsaacSimFrankaExporter
-from robotask_manipulator.understanding import SemanticUnderstandingService, SymbolicActionLabeler, build_semantic_backend
+from robotask_manipulator.task_understanding import (
+    SymbolicActionLabeler,
+    TaskUnderstandingService,
+    build_task_understanding_backend,
+)
 from robotask_manipulator.utils.io import ensure_directory, load_json_file
 from robotask_manipulator.utils.validation import (
     validate_benchmark_episode,
@@ -32,7 +36,9 @@ class RoboTaskManipulatorApp:
         self.settings = settings
         self.ingestor = MediaIngestor(settings.ingestion)
         self.segmenter = Segmenter(settings.segmentation)
-        self.semantic_service = SemanticUnderstandingService(build_semantic_backend(settings.semantic))
+        self.task_understanding_service = TaskUnderstandingService(
+            build_task_understanding_backend(settings.semantic)
+        )
         self.labeler = SymbolicActionLabeler()
         self.action_backend = create_action_backend(settings.action_backend)
         self.context_tagger = ContextTagger()
@@ -44,7 +50,7 @@ class RoboTaskManipulatorApp:
     def run_payload(self, payload: dict[str, Any], base_dir: str | Path) -> EpisodeOutput:
         episode = validate_episode_input(self.ingestor.from_payload(payload, base_dir))
         segments = self.segmenter.segment(episode)
-        segments = self.semantic_service.annotate(episode, segments)
+        segments = self.task_understanding_service.annotate(episode, segments)
 
         self.action_backend.load()
         for segment in segments:

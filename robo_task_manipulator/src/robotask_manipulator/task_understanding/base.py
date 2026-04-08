@@ -1,4 +1,4 @@
-"""Base interfaces for semantic understanding backends."""
+"""Base interfaces for task-understanding backends."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 @dataclass
 class SemanticPrediction:
-    """Structured semantic prediction from a VLM backend."""
+    """Structured semantic prediction from a task-understanding backend."""
 
     description: str
     task_intent: str | None
@@ -21,13 +21,19 @@ class SemanticPrediction:
     evidence: dict[str, Any] = field(default_factory=dict)
 
 
-class BaseSemanticBackend(ABC):
-    """Semantic backend for conservative step understanding."""
+class BaseTaskUnderstandingBackend(ABC):
+    """Task-understanding backend for conservative segment semantics."""
 
     @abstractmethod
     def load(self) -> None:
         """Load resources if needed."""
 
     @abstractmethod
-    def predict(self, image_path: str, instruction: str, step_index: int, total_steps: int) -> SemanticPrediction:
-        """Produce a structured semantic step prediction."""
+    def predict(
+        self,
+        frame_paths: list[str],
+        instruction: str,
+        step_index: int,
+        total_steps: int,
+    ) -> SemanticPrediction:
+        """Produce a structured semantic step prediction from ordered frames."""

@@ -14,6 +14,7 @@ def test_single_inference_end_to_end(tmp_path: Path) -> None:
     output_path, raw_path, output = run(
         input_path=input_path,
         output_dir=tmp_path,
+        semantic_offline=True,
         action_backend="none",
     )
 
@@ -32,6 +33,7 @@ def test_batch_manifest_generation(tmp_path: Path) -> None:
         config=None,
         semantic_model=None,
         semantic_backend=None,
+        semantic_offline=True,
         action_backend="none",
         model_id=None,
         checkpoint=None,

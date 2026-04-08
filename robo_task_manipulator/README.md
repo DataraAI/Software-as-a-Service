@@ -13,7 +13,7 @@ Input:
 
 Output:
 - ordered task segments
-- semantic step descriptions from a VLM layer
+- segment-level task step descriptions from a VLM layer
 - conservative symbolic action labels
 - lightweight context/failure tags
 - ordered task graph links
@@ -26,8 +26,8 @@ Output:
 flowchart TD
     A["Input media<br/>image, video, or extracted frames"] --> B["ingestion/<br/>detect media and extract frames"]
     B --> C["segmentation/<br/>fixed-window step candidates"]
-    C --> D["understanding/<br/>VLM semantic step understanding"]
-    D --> E["understanding/labeling.py<br/>conservative symbolic labels"]
+    C --> D["task_understanding/<br/>segment-level VLM step understanding"]
+    D --> E["task_understanding/labeling.py<br/>conservative symbolic labels"]
     E --> F["action_backend/<br/>optional pi0/OpenVLA/none proposals"]
     F --> G["context/<br/>heuristic context and failure tags"]
     G --> H["graph/<br/>ordered task graph"]
@@ -40,9 +40,10 @@ flowchart TD
 
 Semantic understanding:
 - primary engine for v1
-- implemented through `understanding/`
-- default backend is a pretrained Transformers image-to-text model (`Salesforce/blip-image-captioning-base`)
-- if the VLM is unavailable, the code falls back to conservative instruction-guided heuristics instead of fabricating certainty
+- implemented through `task_understanding/`
+- default backend is a pretrained multimodal instruction VLM (`HuggingFaceTB/SmolVLM-256M-Instruct`)
+- it receives multiple ordered frames from each segment, not just one representative frame
+- if the VLM is unavailable, the code falls back to conservative visual heuristics instead of fabricating certainty
 
 Action backend:
 - optional
@@ -59,7 +60,7 @@ Action backend:
 - `scripts/`: runnable entry points for single inference, batch annotation, and evaluation
 - `src/robotask_manipulator/ingestion/`: media detection and frame extraction
 - `src/robotask_manipulator/segmentation/`: deterministic temporal segmentation
-- `src/robotask_manipulator/understanding/`: semantic VLM backend plus symbolic labeling
+- `src/robotask_manipulator/task_understanding/`: segment-level semantic VLM backend plus symbolic labeling
 - `src/robotask_manipulator/action_backend/`: optional robot-oriented backends such as pi0
 - `src/robotask_manipulator/context/`: context and failure tagging
 - `src/robotask_manipulator/graph/`: ordered task graph construction
@@ -114,6 +115,17 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+That installs the base stack for:
+- media ingestion
+- segmentation
+- task understanding
+- symbolic labeling
+- export
+- evaluation
+
+Optional `pi0` support is intentionally not required for this workflow.
+If you enable `pi0` later, treat it as a separate optional environment and capability path.
+
 Single inference:
 
 ```bash
@@ -123,11 +135,14 @@ py -3 scripts\run_single_inference.py --input data\sample_inputs\sample_workflow
 Use real pi0 proposals:
 
 ```bash
+pip install -r requirements-pi0.txt
 py -3 scripts\run_single_inference.py ^
   --input data\sample_inputs\sample_workflow_episode_001.json ^
   --action-backend pi0 ^
   --model-id lerobot/pi0_base
 ```
+
+If upstream package resolver conflicts appear for `pi0`, keep using the base semantic-testing environment and set `--action-backend none` until you are specifically ready to work on robot-action proposals.
 
 Batch mode:
 
@@ -162,6 +177,7 @@ Useful env vars:
 - `RTM_SEMANTIC_BACKEND`
 - `RTM_SEMANTIC_MODEL_ID`
 - `RTM_SEMANTIC_DEVICE`
+- `RTM_SEMANTIC_OFFLINE`
 - `RTM_ACTION_BACKEND`
 - `PI0_MODEL_ID`
 - `PI0_CHECKPOINT_PATH`
@@ -205,9 +221,10 @@ Reports are written as:
 
 ## Known Limitations
 
-- Semantic understanding is VLM-driven but still conservative and not guaranteed to hit benchmark-quality labels on every frame.
-- The default BLIP-style semantic backend is practical for v1, not robotics-specialized.
+- Semantic understanding is now segment-level and VLM-driven, but it is still conservative and not guaranteed to hit benchmark-quality step descriptions on every real video.
+- The default small multimodal VLM is practical for testing, but stronger models will likely be needed for higher accuracy on real hand-manipulation tasks.
 - `pi0` proposals are optional and embodiment-sensitive.
+- Optional `pi0` support should be treated as a separate capability path, not part of the default semantic-testing environment.
 - Video segmentation is heuristic and window-based rather than learned.
 - Context/failure tags are lightweight heuristics and do not imply true physics certainty.
 - Isaac Sim export is plan-oriented; direct sim execution is intentionally out of scope for v1.
@@ -216,6 +233,7 @@ Reports are written as:
 ## Current Default Behavior
 
 - semantic understanding: enabled
+- segment-level task understanding: enabled
 - symbolic labeling: enabled
 - action backend: `none`
 - Isaac Sim export: enabled

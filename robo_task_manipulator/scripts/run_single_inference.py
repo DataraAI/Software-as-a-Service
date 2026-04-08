@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default=None, help="Optional YAML settings file.")
     parser.add_argument("--semantic-model", default=None, help="Override the semantic VLM model id.")
     parser.add_argument("--semantic-backend", default=None, help="Override the semantic backend name.")
+    parser.add_argument("--semantic-offline", action="store_true", help="Use local files only for the semantic VLM.")
     parser.add_argument("--action-backend", default=None, help="Choose pi0, openvla, or none.")
     parser.add_argument("--model-id", default=None, help="Override the pi0 model id when pi0 is enabled.")
     parser.add_argument("--checkpoint", default=None, help="Optional local pi0 checkpoint directory.")
@@ -42,6 +43,7 @@ def run(
     config_path: str | Path | None = None,
     semantic_model: str | None = None,
     semantic_backend: str | None = None,
+    semantic_offline: bool | None = None,
     action_backend: str | None = None,
     model_id: str | None = None,
     checkpoint: str | None = None,
@@ -58,6 +60,7 @@ def run(
             settings.semantic,
             model_id=semantic_model or settings.semantic.model_id,
             backend=semantic_backend or settings.semantic.backend,
+            offline=semantic_offline if semantic_offline is not None else settings.semantic.offline,
         ),
         action_backend=replace(
             settings.action_backend,
@@ -95,6 +98,7 @@ def main() -> int:
         config_path=args.config,
         semantic_model=args.semantic_model,
         semantic_backend=args.semantic_backend,
+        semantic_offline=args.semantic_offline,
         action_backend=args.action_backend,
         model_id=args.model_id,
         checkpoint=args.checkpoint,

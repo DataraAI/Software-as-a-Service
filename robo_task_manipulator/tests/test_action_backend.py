@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from robotask_manipulator.action_backend import Pi0ActionBackend, create_action_backend
+from robotask_manipulator.action_backend import create_action_backend
 from robotask_manipulator.config import ActionBackendSettings
 from robotask_manipulator.schemas import ActionLabel, SegmentAnnotation, SemanticStep, SymbolicActionLabel
 from robotask_manipulator.utils.validation import InvalidInputError, ModelLoadError
@@ -17,6 +17,9 @@ def test_action_backend_factory_supports_none() -> None:
 
 
 def test_pi0_backend_invalid_checkpoint_raises(tmp_path: Path) -> None:
+    pytest.importorskip("lerobot")
+    from robotask_manipulator.action_backend.pi0_backend import Pi0ActionBackend
+
     checkpoint = tmp_path / "missing_checkpoint"
     checkpoint.mkdir()
     backend = Pi0ActionBackend(
@@ -31,6 +34,9 @@ def test_pi0_backend_invalid_checkpoint_raises(tmp_path: Path) -> None:
 
 
 def test_pi0_backend_requires_image_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("lerobot")
+    from robotask_manipulator.action_backend.pi0_backend import Pi0ActionBackend
+
     backend = Pi0ActionBackend(ActionBackendSettings(backend="pi0"))
     backend._loaded = True
     backend._policy = object()
