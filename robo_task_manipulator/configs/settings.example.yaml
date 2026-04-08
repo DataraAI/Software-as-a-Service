@@ -11,7 +11,7 @@ segmentation:
 
 semantic:
   backend: multimodal_vlm
-  model_id: HuggingFaceTB/SmolVLM-256M-Instruct
+  model_id: HuggingFaceTB/SmolVLM2-500M-Video-Instruct
   device: cpu
   offline: false
   strict: false

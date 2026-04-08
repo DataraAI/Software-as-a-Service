@@ -41,7 +41,7 @@ flowchart TD
 Semantic understanding:
 - primary engine for v1
 - implemented through `task_understanding/`
-- default backend is a pretrained multimodal instruction VLM (`HuggingFaceTB/SmolVLM-256M-Instruct`)
+- default backend is a pretrained multimodal instruction VLM (`HuggingFaceTB/SmolVLM2-500M-Video-Instruct`)
 - it receives multiple ordered frames from each segment, not just one representative frame
 - if the VLM is unavailable, the code falls back to conservative visual heuristics instead of fabricating certainty
 
@@ -222,7 +222,7 @@ Reports are written as:
 ## Known Limitations
 
 - Semantic understanding is now segment-level and VLM-driven, but it is still conservative and not guaranteed to hit benchmark-quality step descriptions on every real video.
-- The default small multimodal VLM is practical for testing, but stronger models will likely be needed for higher accuracy on real hand-manipulation tasks.
+- The default video-capable multimodal VLM is practical for testing, but stronger models may still be needed for higher accuracy on subtle real hand-manipulation tasks.
 - `pi0` proposals are optional and embodiment-sensitive.
 - Optional `pi0` support should be treated as a separate capability path, not part of the default semantic-testing environment.
 - Video segmentation is heuristic and window-based rather than learned.

@@ -29,4 +29,9 @@ def test_task_understanding_uses_multiple_frames_with_conservative_fallback() ->
     )
     assert prediction.description
     assert len(prediction.evidence["sampled_frame_paths"]) >= 2
-    assert prediction.evidence["pipeline_mode"] in {"image-text-to-text", "image-to-text", "heuristic"}
+    assert prediction.evidence["pipeline_mode"] in {
+        "direct-image-text-to-text",
+        "image-text-to-text",
+        "image-to-text",
+        "heuristic",
+    }

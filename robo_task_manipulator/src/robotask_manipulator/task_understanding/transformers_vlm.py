@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -21,12 +23,33 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
     def __init__(self, settings: SemanticSettings) -> None:
         self.settings = settings
         self._pipeline = None
+        self._processor = None
+        self._model = None
+        self._model_device = settings.device
+        self._model_dtype = None
         self._pipeline_mode = "unloaded"
 
     def load(self) -> None:
-        if self._pipeline is not None:
+        if self._pipeline is not None or self._model is not None:
             return
         try:
+            if self.settings.offline:
+                # The generic transformers pipeline does not consistently accept
+                # local_files_only, so use the standard offline env flags instead.
+                os.environ.setdefault("HF_HUB_OFFLINE", "1")
+                os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
+            if _prefers_direct_model_path(self.settings.model_id):
+                try:
+                    self._load_direct_model()
+                    return
+                except Exception as direct_exc:  # noqa: BLE001
+                    LOGGER.warning(
+                        "Falling back from direct model path to transformers pipeline for model=%s: %s",
+                        self.settings.model_id,
+                        direct_exc,
+                    )
+
             from transformers import pipeline
 
             device = 0 if self.settings.device.startswith("cuda") else -1
@@ -35,7 +58,6 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
                     "image-text-to-text",
                     model=self.settings.model_id,
                     device=device,
-                    local_files_only=self.settings.offline,
                 )
                 self._pipeline_mode = "image-text-to-text"
                 LOGGER.info(
@@ -55,7 +77,6 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
                 "image-to-text",
                 model=self.settings.model_id,
                 device=device,
-                local_files_only=self.settings.offline,
             )
             self._pipeline_mode = "image-to-text"
             LOGGER.info(
@@ -89,7 +110,10 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
         raw_text: str | None = None
         confidence = 0.3
 
-        if self._pipeline and self._pipeline_mode == "image-text-to-text":
+        if self._model and self._pipeline_mode == "direct-image-text-to-text":
+            raw_text = self._predict_direct_multiframe(sampled_paths, instruction, step_index, total_steps)
+            confidence = 0.82 if raw_text else 0.35
+        elif self._pipeline and self._pipeline_mode == "image-text-to-text":
             raw_text = self._predict_multiframe(sampled_paths, instruction, step_index, total_steps)
             confidence = 0.78 if raw_text else 0.35
         elif self._pipeline and self._pipeline_mode == "image-to-text":
@@ -124,6 +148,49 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
             },
         )
 
+    def _load_direct_model(self) -> None:
+        """Load models that work best through the official AutoProcessor + model path."""
+        import torch
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+
+        self._processor = AutoProcessor.from_pretrained(self.settings.model_id)
+        self._model_dtype = _select_model_dtype(self.settings.device)
+
+        model_kwargs: dict[str, Any] = {"torch_dtype": self._model_dtype}
+        if self.settings.device.startswith("cuda"):
+            # Prefer flash attention when available, but do not require it.
+            model_kwargs["_attn_implementation"] = "flash_attention_2"
+
+        try:
+            self._model = AutoModelForImageTextToText.from_pretrained(
+                self.settings.model_id,
+                **model_kwargs,
+            )
+        except Exception as exc:  # noqa: BLE001
+            if "_attn_implementation" in model_kwargs:
+                LOGGER.info(
+                    "Retrying semantic VLM load without flash attention for model=%s after: %s",
+                    self.settings.model_id,
+                    exc,
+                )
+                model_kwargs.pop("_attn_implementation", None)
+                self._model = AutoModelForImageTextToText.from_pretrained(
+                    self.settings.model_id,
+                    **model_kwargs,
+                )
+            else:
+                raise
+
+        self._model_device = "cuda" if self.settings.device.startswith("cuda") else "cpu"
+        self._model = self._model.to(self._model_device).eval()
+        self._pipeline_mode = "direct-image-text-to-text"
+        LOGGER.info(
+            "Loaded direct multimodal task-understanding backend model=%s mode=%s dtype=%s",
+            self.settings.model_id,
+            self._pipeline_mode,
+            self._model_dtype,
+        )
+
     def _predict_multiframe(
         self,
         sampled_paths: list[str],
@@ -138,8 +205,10 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
         prompt = (
             "These are ordered frames from one short segment of a human hand manipulation task. "
             "Describe only the single main visible action happening across these frames in 2 to 6 words. "
-            "Focus on the hands and objects. Do not repeat the full task instruction unless it is clearly visible. "
-            "If the action is unclear, answer 'unclear action'. "
+            "Focus on the hands, the manipulated object, and any clear source or target. "
+            "Prefer specific actions such as align connector, insert cable, hold connector, inspect port, remove tray, or tighten fastener when clearly visible. "
+            "Do not repeat the full task instruction unless it is visually supported by the frames. "
+            "If the action is unclear, answer exactly 'unclear action'. "
             f"Task context: {instruction}. Segment position: {step_index + 1} of {total_steps}."
         )
         messages = [
@@ -173,16 +242,92 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
                 captions.append(caption)
         return captions
 
+    def _predict_direct_multiframe(
+        self,
+        sampled_paths: list[str],
+        instruction: str,
+        step_index: int,
+        total_steps: int,
+    ) -> str | None:
+        if not self._processor or not self._model:
+            return None
+
+        prompt = (
+            "These are ordered frames from one short segment of a human hand manipulation task. "
+            "Describe only the single main visible action happening across these frames in 2 to 6 words. "
+            "Focus on the hands, the manipulated object, and any clear source or target. "
+            "Prefer specific actions such as align connector, insert cable, hold connector, inspect port, "
+            "remove tray, or tighten fastener when clearly visible. "
+            "Do not repeat the full task instruction unless it is visually supported by the frames. "
+            "If the action is unclear, answer exactly 'unclear action'. "
+            f"Task context: {instruction}. Segment position: {step_index + 1} of {total_steps}."
+        )
+        messages = [
+            {
+                "role": "user",
+                "content": (
+                    [{"type": "image", "path": frame_path} for frame_path in sampled_paths]
+                    + [{"type": "text", "text": prompt}]
+                ),
+            }
+        ]
+
+        try:
+            inputs = self._processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+            if self._model_dtype is not None:
+                inputs = inputs.to(self._model.device, dtype=self._model_dtype)
+            else:
+                inputs = inputs.to(self._model.device)
+            generated_ids = self._model.generate(
+                **inputs,
+                do_sample=False,
+                max_new_tokens=48,
+            )
+            generated_texts = self._processor.batch_decode(
+                generated_ids,
+                skip_special_tokens=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Direct multiframe VLM inference failed for frames=%s: %s", sampled_paths, exc)
+            return None
+
+        if not generated_texts:
+            return None
+        return _strip_assistant_prefix(generated_texts[0])
+
 
 def _sample_frame_paths(frame_paths: list[str]) -> list[str]:
     unique_paths = []
     for path in frame_paths:
         if path not in unique_paths:
             unique_paths.append(path)
-    if len(unique_paths) <= 3:
+    if len(unique_paths) <= 6:
         return unique_paths
-    indices = {0, len(unique_paths) // 2, len(unique_paths) - 1}
+    max_samples = 6
+    indices = {
+        round(index * (len(unique_paths) - 1) / (max_samples - 1))
+        for index in range(max_samples)
+    }
     return [unique_paths[index] for index in sorted(indices)]
+
+
+def _prefers_direct_model_path(model_id: str) -> bool:
+    lowered = model_id.strip().lower()
+    return "smolvlm" in lowered or "qwen2.5-vl" in lowered or "qwen2-vl" in lowered
+
+
+def _select_model_dtype(device: str):
+    try:
+        import torch
+    except ImportError:  # pragma: no cover
+        return None
+    return torch.bfloat16 if device.startswith("cuda") else torch.float32
 
 
 def _load_images(frame_paths: list[str]) -> list[Image.Image]:
@@ -227,6 +372,15 @@ def _coerce_generated_text(outputs) -> str | None:
     if isinstance(first, str):
         return first.strip()
     return str(first).strip() or None
+
+
+def _strip_assistant_prefix(text: str | None) -> str | None:
+    if not text:
+        return None
+    cleaned = text.strip()
+    cleaned = re.sub(r"^assistant\s*[:\-]?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^answer\s*[:\-]?\s*", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip() or None
 
 
 def _normalize_step_description(raw_text: str | None) -> str | None:

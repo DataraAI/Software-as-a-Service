@@ -42,7 +42,7 @@ class SemanticSettings:
     """Settings for semantic step understanding."""
 
     backend: str = "multimodal_vlm"
-    model_id: str = "HuggingFaceTB/SmolVLM-256M-Instruct"
+    model_id: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
     device: str = "cpu"
     offline: bool = False
     strict: bool = False
