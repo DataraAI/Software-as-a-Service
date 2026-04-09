@@ -156,7 +156,7 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
         self._processor = AutoProcessor.from_pretrained(self.settings.model_id)
         self._model_dtype = _select_model_dtype(self.settings.device)
 
-        model_kwargs: dict[str, Any] = {"torch_dtype": self._model_dtype}
+        model_kwargs: dict[str, Any] = {"dtype": self._model_dtype}
         if self.settings.device.startswith("cuda"):
             # Prefer flash attention when available, but do not require it.
             model_kwargs["_attn_implementation"] = "flash_attention_2"
@@ -289,6 +289,9 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
                 do_sample=False,
                 max_new_tokens=48,
             )
+            if "input_ids" in inputs:
+                prompt_length = inputs["input_ids"].shape[1]
+                generated_ids = generated_ids[:, prompt_length:]
             generated_texts = self._processor.batch_decode(
                 generated_ids,
                 skip_special_tokens=True,
