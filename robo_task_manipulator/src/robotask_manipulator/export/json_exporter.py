@@ -17,6 +17,14 @@ class JsonArtifactExporter:
     def write_raw_debug(self, output: EpisodeOutput, path: str | Path) -> Path:
         debug_payload = {
             "episode_id": output.episode_id,
+            "frame_predictions": [
+                {
+                    "frame_id": frame.frame_id,
+                    "frame_index": frame.frame_index,
+                    "raw_outputs": frame.raw_outputs,
+                }
+                for frame in output.frame_predictions
+            ],
             "segments": [
                 {
                     "segment_id": segment.segment_id,
@@ -44,6 +52,7 @@ class JsonArtifactExporter:
             split=split,
             episode_output_path=str(Path(episode_output_path)),
             raw_output_path=str(Path(raw_output_path)) if raw_output_path else None,
+            num_frame_predictions=len(output.frame_predictions),
             num_segments=len(output.segments),
             action_labels=[segment.symbolic_action.label for segment in output.segments],
             success=all(segment.success is not False for segment in output.segments),

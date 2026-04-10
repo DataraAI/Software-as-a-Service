@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+from statistics import mean
 
 import numpy as np
 from PIL import Image
 
 from robotask_manipulator.config import SegmentationSettings
-from robotask_manipulator.schemas import ActionLabel, EpisodeInput, SegmentAnnotation, SemanticStep, SymbolicActionLabel
+from robotask_manipulator.schemas import (
+    ActionLabel,
+    EpisodeInput,
+    FrameAnnotation,
+    SegmentAnnotation,
+    SemanticStep,
+    SymbolicActionLabel,
+)
 
 
 class Segmenter:
@@ -47,6 +55,56 @@ class Segmenter:
             segment.next_step_refs = [segments[index + 1].segment_id]
         return segments
 
+    def summarize_frame_predictions(
+        self,
+        episode: EpisodeInput,
+        frame_predictions: list[FrameAnnotation],
+    ) -> list[SegmentAnnotation]:
+        if not frame_predictions:
+            return []
+
+        groups: list[list[FrameAnnotation]] = []
+        current_group = [frame_predictions[0]]
+        for frame_prediction in frame_predictions[1:]:
+            if self._same_summary_group(current_group[-1], frame_prediction):
+                current_group.append(frame_prediction)
+            else:
+                groups.append(current_group)
+                current_group = [frame_prediction]
+        groups.append(current_group)
+
+        segments: list[SegmentAnnotation] = []
+        for step_index, group in enumerate(groups):
+            representative = group[len(group) // 2]
+            semantic = self._summarize_semantic(group)
+            symbolic_action = self._summarize_symbolic_action(group)
+            context_tags = self._summarize_context_tags(group)
+            segment = SegmentAnnotation(
+                segment_id=f"{episode.episode_id}-segment-{step_index:03d}",
+                episode_id=episode.episode_id,
+                step_index=step_index,
+                observation_refs=[frame.asset_ref for frame in group],
+                representative_frame_ref=representative.asset_ref,
+                frame_start_index=group[0].frame_index,
+                frame_end_index=group[-1].frame_index,
+                timestamp_start_s=group[0].timestamp_s,
+                timestamp_end_s=group[-1].timestamp_s,
+                segmentation_confidence=round(min(0.98, mean(frame.semantic.confidence for frame in group) + 0.08), 2),
+                semantic=semantic,
+                symbolic_action=symbolic_action,
+                context_tags=context_tags,
+                success=all(frame.success is not False for frame in group),
+                raw_outputs={
+                    "frame_prediction_ids": [frame.frame_id for frame in group],
+                    "merged_from_frames": len(group),
+                },
+            )
+            segments.append(segment)
+
+        for index, segment in enumerate(segments[:-1]):
+            segment.next_step_refs = [segments[index + 1].segment_id]
+        return segments
+
     def _build_boundaries(self, frames) -> list[tuple[int, int]]:
         if len(frames) <= self.settings.frames_per_segment:
             return [(0, len(frames) - 1)]
@@ -72,3 +130,44 @@ class Segmenter:
 
     def _confidence(self, window) -> float:
         return round(min(0.95, 0.55 + 0.08 * len(window)), 2)
+
+    def _same_summary_group(self, left: FrameAnnotation, right: FrameAnnotation) -> bool:
+        return (
+            left.semantic.description == right.semantic.description
+            and left.symbolic_action.label == right.symbolic_action.label
+        )
+
+    def _summarize_semantic(self, group: list[FrameAnnotation]) -> SemanticStep:
+        representative = group[len(group) // 2]
+        return SemanticStep(
+            description=representative.semantic.description,
+            task_intent=representative.semantic.task_intent,
+            objects_involved=representative.semantic.objects_involved,
+            object_source=representative.semantic.object_source,
+            object_target=representative.semantic.object_target,
+            confidence=round(mean(frame.semantic.confidence for frame in group), 2),
+            evidence={
+                "frame_count": len(group),
+                "frame_indices": [frame.frame_index for frame in group],
+                "grouping": "consecutive_equal_description_and_label",
+            },
+        )
+
+    def _summarize_symbolic_action(self, group: list[FrameAnnotation]) -> SymbolicActionLabel:
+        representative = group[len(group) // 2]
+        return SymbolicActionLabel(
+            label=representative.symbolic_action.label,
+            confidence=round(mean(frame.symbolic_action.confidence for frame in group), 2),
+            source=representative.symbolic_action.source,
+            evidence={
+                "frame_count": len(group),
+                "frame_indices": [frame.frame_index for frame in group],
+            },
+        )
+
+    def _summarize_context_tags(self, group: list[FrameAnnotation]):
+        seen = {}
+        for frame in group:
+            for tag in frame.context_tags:
+                seen[str(tag.name)] = tag
+        return list(seen.values())

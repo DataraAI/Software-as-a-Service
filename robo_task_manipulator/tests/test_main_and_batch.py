@@ -22,6 +22,7 @@ def test_single_inference_end_to_end(tmp_path: Path) -> None:
     assert raw_path is not None and raw_path.exists()
     payload = load_json_file(output_path)
     assert payload["episode_id"] == output.episode_id
+    assert len(payload["frame_predictions"]) >= len(payload["segments"])
     assert payload["simulation_export"]["robot"] == "franka_panda"
 
 
@@ -32,6 +33,7 @@ def test_batch_manifest_generation(tmp_path: Path) -> None:
         output_dir=str(tmp_path),
         config=None,
         semantic_model=None,
+        semantic_model_path=None,
         semantic_backend=None,
         semantic_offline=True,
         action_backend="none",
@@ -47,3 +49,4 @@ def test_batch_manifest_generation(tmp_path: Path) -> None:
     assert Path(manifest_path).exists()
     manifest = load_json_file(manifest_path)
     assert manifest["summary"]["episodes"] >= 1
+    assert manifest["records"][0]["num_frame_predictions"] >= manifest["records"][0]["num_segments"]

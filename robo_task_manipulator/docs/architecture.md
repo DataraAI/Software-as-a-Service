@@ -8,16 +8,17 @@ RoboTaskManipulator is organized by product responsibility, not by abstract pipe
 - owns media type detection
 - owns video frame extraction
 - owns canonical `EpisodeInput` creation
+- defaults to full-frame video extraction unless explicitly downsampled
 
 ### `segmentation/`
-- owns deterministic temporal segmentation
-- owns fixed-window and visual-change heuristics
-- outputs ordered segment skeletons
+- owns grouped step summaries
+- merges consecutive frame predictions into readable summary segments
+- keeps the rest of the pipeline compatible with Isaac Sim export and evaluation
 
 ### `task_understanding/`
-- owns segment-level task understanding
+- owns frame-level task understanding
 - owns the semantic backend abstraction
-- owns conservative symbolic labeling
+- owns rolling-context VLM inference and conservative symbolic labeling
 
 ### `action_backend/`
 - owns optional robot-oriented backends
@@ -54,22 +55,24 @@ RoboTaskManipulator is organized by product responsibility, not by abstract pipe
 
 ## Product Flow
 
-1. `ingestion/` converts media into a canonical ordered episode.
-2. `segmentation/` splits that episode into candidate steps.
-3. `task_understanding/` produces semantic step descriptions from ordered frames within a segment.
-4. `task_understanding/labeling.py` converts semantics into conservative symbolic actions.
-5. `action_backend/` optionally adds robot-oriented action proposals.
-6. `context/` adds lightweight tags.
-7. `graph/` links the sequence.
+1. `ingestion/` converts media into a canonical ordered episode and extracts all frames by default.
+2. `task_understanding/` produces one semantic prediction per frame using a small rolling context window.
+3. `task_understanding/labeling.py` converts frame semantics into conservative symbolic actions.
+4. `context/` adds lightweight per-frame tags.
+5. `segmentation/` groups consecutive frame predictions into summary segments.
+6. `action_backend/` optionally adds robot-oriented action proposals to the summary segments.
+7. `graph/` links the summary sequence.
 8. `simulation/` builds the Isaac Sim task plan.
 9. `export/` writes episode artifacts.
-10. `evaluation/` scores outputs when benchmark truth exists.
+10. `evaluation/` scores grouped outputs when benchmark truth exists.
 
 ## Practical Design Choices
 
-- Segment-level task understanding is the primary source of step meaning in v1.
+- Frame-level task understanding is the primary source of meaning in the current build.
+- Grouped steps are a derived summary view built after frame predictions.
 - `pi0` is optional and used for action proposals, not as the main semantic engine.
-- Segmentation is intentionally simple and deterministic.
+- The default semantic target is a local Qwen2.5-VL 7B model path or Hub id.
+- Grouped step formation is intentionally simple and deterministic.
 - Context/failure tagging is heuristic and explicit about confidence.
 - Isaac Sim integration is export-oriented rather than execution-oriented.
 - Evaluation prioritizes easy-to-read metrics over research complexity.
@@ -77,9 +80,9 @@ RoboTaskManipulator is organized by product responsibility, not by abstract pipe
 ## Implemented Now
 
 - images, videos, and extracted frame sequences as inputs
-- automatic frame extraction for videos
-- deterministic segmentation
-- VLM-driven semantic step understanding
+- automatic full-frame extraction for videos
+- one semantic prediction per frame
+- grouped summary segments derived from frame predictions
 - conservative symbolic labeling with `unknown` fallback
 - optional `pi0` action proposals
 - context/failure tagging

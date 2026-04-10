@@ -146,6 +146,22 @@ class ContextTag(BaseModel):
     evidence: dict[str, Any] = Field(default_factory=dict)
 
 
+class FrameAnnotation(BaseModel):
+    """One semantic prediction per frame, using a small rolling context window."""
+
+    frame_id: str
+    episode_id: str
+    frame_index: int = Field(ge=0)
+    asset_ref: str
+    timestamp_s: float | None = Field(default=None, ge=0.0)
+    context_frame_refs: list[str] = Field(default_factory=list)
+    semantic: SemanticStep
+    symbolic_action: SymbolicActionLabel
+    context_tags: list[ContextTag] = Field(default_factory=list)
+    success: bool | None = None
+    raw_outputs: dict[str, Any] = Field(default_factory=dict)
+
+
 class SegmentAnnotation(BaseModel):
     """One ordered task segment."""
 
@@ -234,11 +250,19 @@ class EpisodeOutput(BaseModel):
     task_name: str
     instruction: str
     input_metadata: MediaMetadata
+    frame_predictions: list[FrameAnnotation]
     segments: list[SegmentAnnotation]
     task_graph: TaskGraph
     simulation_export: IsaacSimExport
     evaluation: EvaluationSummary | None = None
     batch_metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("frame_predictions")
+    @classmethod
+    def validate_frame_predictions(cls, value: list[FrameAnnotation]) -> list[FrameAnnotation]:
+        if not value:
+            raise ValueError("frame_predictions must not be empty")
+        return value
 
     @field_validator("segments")
     @classmethod
@@ -265,6 +289,7 @@ class DatasetManifestRecord(BaseModel):
     split: DatasetSplit = DatasetSplit.UNSPECIFIED
     episode_output_path: str
     raw_output_path: str | None = None
+    num_frame_predictions: int = Field(ge=0)
     num_segments: int = Field(ge=0)
     action_labels: list[ActionLabel] = Field(default_factory=list)
     success: bool | None = None

@@ -2,20 +2,40 @@
 
 from __future__ import annotations
 
-from robotask_manipulator.schemas import ActionLabel, ContextTag, ContextTagName, SegmentAnnotation
+from robotask_manipulator.schemas import ActionLabel, ContextTag, ContextTagName, FrameAnnotation, SegmentAnnotation, SemanticStep, SymbolicActionLabel
 
 
 class ContextTagger:
     """Heuristic context/failure tagging based on semantic and optional action signals."""
 
     def annotate(self, segment: SegmentAnnotation) -> list[ContextTag]:
+        return self._annotate_common(
+            semantic=segment.semantic,
+            symbolic_action=segment.symbolic_action,
+            action_metadata=(segment.action_proposal.metadata if segment.action_proposal else {}),
+        )
+
+    def annotate_frame(self, frame: FrameAnnotation) -> list[ContextTag]:
+        return self._annotate_common(
+            semantic=frame.semantic,
+            symbolic_action=frame.symbolic_action,
+            action_metadata={},
+        )
+
+    def _annotate_common(
+        self,
+        *,
+        semantic: SemanticStep,
+        symbolic_action: SymbolicActionLabel,
+        action_metadata: dict,
+    ) -> list[ContextTag]:
         tags: list[ContextTag] = []
-        description = segment.semantic.description.lower()
-        caption = str(segment.semantic.evidence.get("caption") or "").lower()
-        stats = (segment.action_proposal.metadata if segment.action_proposal else {}).get("chunk_stats", {})
+        description = semantic.description.lower()
+        caption = str(semantic.evidence.get("caption") or "").lower()
+        stats = action_metadata.get("chunk_stats", {})
         variance = float(stats.get("variance", 0.0))
         mean_abs = float(stats.get("mean_abs", 0.0))
-        label = ActionLabel(str(segment.symbolic_action.label))
+        label = ActionLabel(str(symbolic_action.label))
 
         if "occlud" in description or caption.find("occluded") >= 0:
             tags.append(self._tag(ContextTagName.OCCLUSION, 0.55, "semantic_vlm", {"description": description}))

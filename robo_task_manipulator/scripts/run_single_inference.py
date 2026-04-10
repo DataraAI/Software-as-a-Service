@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=str(ROOT / "data" / "outputs"))
     parser.add_argument("--config", default=None, help="Optional YAML settings file.")
     parser.add_argument("--semantic-model", default=None, help="Override the semantic VLM model id.")
+    parser.add_argument("--semantic-model-path", default=None, help="Optional local semantic VLM directory.")
     parser.add_argument("--semantic-backend", default=None, help="Override the semantic backend name.")
     parser.add_argument("--semantic-offline", action="store_true", help="Use local files only for the semantic VLM.")
     parser.add_argument("--action-backend", default=None, help="Choose pi0, openvla, or none.")
@@ -42,6 +43,7 @@ def run(
     *,
     config_path: str | Path | None = None,
     semantic_model: str | None = None,
+    semantic_model_path: str | None = None,
     semantic_backend: str | None = None,
     semantic_offline: bool | None = None,
     action_backend: str | None = None,
@@ -59,6 +61,7 @@ def run(
         semantic=replace(
             settings.semantic,
             model_id=semantic_model or settings.semantic.model_id,
+            local_model_path=semantic_model_path or settings.semantic.local_model_path,
             backend=semantic_backend or settings.semantic.backend,
             offline=semantic_offline if semantic_offline is not None else settings.semantic.offline,
         ),
@@ -80,8 +83,9 @@ def run(
     output_path, raw_output_path = app.export_episode(output, output_dir)
 
     logger.info(
-        "Processed episode=%s segments=%s labels=%s output=%s",
+        "Processed episode=%s frame_predictions=%s segments=%s labels=%s output=%s",
         output.episode_id,
+        len(output.frame_predictions),
         len(output.segments),
         [str(segment.symbolic_action.label) for segment in output.segments],
         output_path,
@@ -97,6 +101,7 @@ def main() -> int:
         args.output_dir,
         config_path=args.config,
         semantic_model=args.semantic_model,
+        semantic_model_path=args.semantic_model_path,
         semantic_backend=args.semantic_backend,
         semantic_offline=args.semantic_offline,
         action_backend=args.action_backend,

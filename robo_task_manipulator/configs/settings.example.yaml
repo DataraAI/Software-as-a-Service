@@ -1,6 +1,6 @@
 ingestion:
-  video_frame_stride: 15
-  max_frames: 24
+  video_frame_stride: 1
+  max_frames: 0
   prefer_visual_change: true
   visual_change_threshold: 0.18
 
@@ -11,10 +11,12 @@ segmentation:
 
 semantic:
   backend: multimodal_vlm
-  model_id: HuggingFaceTB/SmolVLM2-500M-Video-Instruct
+  model_id: Qwen/Qwen2.5-VL-7B-Instruct
+  local_model_path: null
   device: cpu
   offline: false
   strict: false
+  frame_context_radius: 1
 
 action_backend:
   backend: none

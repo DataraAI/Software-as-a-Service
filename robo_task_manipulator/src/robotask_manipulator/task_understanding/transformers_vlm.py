@@ -33,20 +33,21 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
         if self._pipeline is not None or self._model is not None:
             return
         try:
+            model_source = self.settings.model_source
             if self.settings.offline:
                 # The generic transformers pipeline does not consistently accept
                 # local_files_only, so use the standard offline env flags instead.
                 os.environ.setdefault("HF_HUB_OFFLINE", "1")
                 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-            if _prefers_direct_model_path(self.settings.model_id):
+            if _prefers_direct_model_path(model_source, self.settings.local_model_path):
                 try:
                     self._load_direct_model()
                     return
                 except Exception as direct_exc:  # noqa: BLE001
                     LOGGER.warning(
                         "Falling back from direct model path to transformers pipeline for model=%s: %s",
-                        self.settings.model_id,
+                        model_source,
                         direct_exc,
                     )
 
@@ -56,38 +57,38 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
             try:
                 self._pipeline = pipeline(
                     "image-text-to-text",
-                    model=self.settings.model_id,
+                    model=model_source,
                     device=device,
                 )
                 self._pipeline_mode = "image-text-to-text"
                 LOGGER.info(
                     "Loaded multimodal task-understanding backend model=%s mode=%s",
-                    self.settings.model_id,
+                    model_source,
                     self._pipeline_mode,
                 )
                 return
             except Exception as vlm_exc:  # noqa: BLE001
                 LOGGER.warning(
                     "Falling back from image-text-to-text to image-to-text for model=%s: %s",
-                    self.settings.model_id,
+                    model_source,
                     vlm_exc,
                 )
 
             self._pipeline = pipeline(
                 "image-to-text",
-                model=self.settings.model_id,
+                model=model_source,
                 device=device,
             )
             self._pipeline_mode = "image-to-text"
             LOGGER.info(
                 "Loaded caption-based task-understanding backend model=%s mode=%s",
-                self.settings.model_id,
+                model_source,
                 self._pipeline_mode,
             )
         except Exception as exc:  # noqa: BLE001
             if self.settings.strict:
                 raise RuntimeError(
-                    f"Failed to load task-understanding backend '{self.settings.model_id}'."
+                    f"Failed to load task-understanding backend '{self.settings.model_source}'."
                 ) from exc
             LOGGER.warning(
                 "Falling back to conservative task-understanding heuristic because VLM load failed: %s",
@@ -153,7 +154,8 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
         import torch
         from transformers import AutoModelForImageTextToText, AutoProcessor
 
-        self._processor = AutoProcessor.from_pretrained(self.settings.model_id)
+        model_source = self.settings.model_source
+        self._processor = AutoProcessor.from_pretrained(model_source)
         self._model_dtype = _select_model_dtype(self.settings.device)
 
         model_kwargs: dict[str, Any] = {"dtype": self._model_dtype}
@@ -163,19 +165,19 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
 
         try:
             self._model = AutoModelForImageTextToText.from_pretrained(
-                self.settings.model_id,
+                model_source,
                 **model_kwargs,
             )
         except Exception as exc:  # noqa: BLE001
             if "_attn_implementation" in model_kwargs:
                 LOGGER.info(
                     "Retrying semantic VLM load without flash attention for model=%s after: %s",
-                    self.settings.model_id,
+                    model_source,
                     exc,
                 )
                 model_kwargs.pop("_attn_implementation", None)
                 self._model = AutoModelForImageTextToText.from_pretrained(
-                    self.settings.model_id,
+                    model_source,
                     **model_kwargs,
                 )
             else:
@@ -186,7 +188,7 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
         self._pipeline_mode = "direct-image-text-to-text"
         LOGGER.info(
             "Loaded direct multimodal task-understanding backend model=%s mode=%s dtype=%s",
-            self.settings.model_id,
+            model_source,
             self._pipeline_mode,
             self._model_dtype,
         )
@@ -320,9 +322,14 @@ def _sample_frame_paths(frame_paths: list[str]) -> list[str]:
     return [unique_paths[index] for index in sorted(indices)]
 
 
-def _prefers_direct_model_path(model_id: str) -> bool:
-    lowered = model_id.strip().lower()
-    return "smolvlm" in lowered or "qwen2.5-vl" in lowered or "qwen2-vl" in lowered
+def _prefers_direct_model_path(model_source: str, local_model_path: str | None = None) -> bool:
+    lowered = model_source.strip().lower()
+    return (
+        bool(local_model_path)
+        or "smolvlm" in lowered
+        or "qwen2.5-vl" in lowered
+        or "qwen2-vl" in lowered
+    )
 
 
 def _select_model_dtype(device: str):

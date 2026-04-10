@@ -130,7 +130,9 @@ class MediaIngestor:
         output_dir = video_path.parent / f"{video_path.stem}_frames"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        while capture.isOpened() and saved_index < self.settings.max_frames:
+        max_frames = self.settings.max_frames if self.settings.max_frames > 0 else None
+
+        while capture.isOpened() and (max_frames is None or saved_index < max_frames):
             success, frame = capture.read()
             if not success:
                 break

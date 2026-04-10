@@ -27,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=str(ROOT / "data" / "outputs"))
     parser.add_argument("--config", default=None, help="Optional YAML settings file.")
     parser.add_argument("--semantic-model", default=None, help="Override the semantic VLM model id.")
+    parser.add_argument("--semantic-model-path", default=None, help="Optional local semantic VLM directory.")
     parser.add_argument("--semantic-backend", default=None, help="Override the semantic backend name.")
     parser.add_argument("--semantic-offline", action="store_true", help="Use local files only for the semantic VLM.")
     parser.add_argument("--action-backend", default=None, help="Choose pi0, openvla, or none.")
@@ -48,6 +49,7 @@ def run_batch(args: argparse.Namespace) -> tuple[int, object]:
         semantic=replace(
             settings.semantic,
             model_id=args.semantic_model or settings.semantic.model_id,
+            local_model_path=args.semantic_model_path or settings.semantic.local_model_path,
             backend=args.semantic_backend or settings.semantic.backend,
             offline=args.semantic_offline if args.semantic_offline is not None else settings.semantic.offline,
         ),
@@ -77,8 +79,9 @@ def run_batch(args: argparse.Namespace) -> tuple[int, object]:
             app.export_episode(output, args.output_dir)
             outputs.append(output)
             logger.info(
-                "Processed %s -> segments=%s labels=%s",
+                "Processed %s -> frame_predictions=%s segments=%s labels=%s",
                 input_file.name,
+                len(output.frame_predictions),
                 len(output.segments),
                 [str(segment.symbolic_action.label) for segment in output.segments],
             )

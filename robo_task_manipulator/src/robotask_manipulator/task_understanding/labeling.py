@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from robotask_manipulator.schemas import ActionLabel, ActionProposal, SegmentAnnotation, SymbolicActionLabel
+from robotask_manipulator.schemas import (
+    ActionLabel,
+    ActionProposal,
+    FrameAnnotation,
+    SegmentAnnotation,
+    SemanticStep,
+    SymbolicActionLabel,
+)
 
 KEYWORD_SCORES: dict[ActionLabel, tuple[str, ...]] = {
     ActionLabel.PICK: ("pick", "grasp", "lift", "grab", "take out", "remove"),
@@ -25,7 +32,30 @@ class SymbolicActionLabeler:
     """Turn segment semantics plus optional action proposals into conservative symbolic labels."""
 
     def label(self, segment: SegmentAnnotation) -> SymbolicActionLabel:
-        description = segment.semantic.description.lower()
+        source = "task_understanding_vlm"
+        if segment.action_proposal is not None:
+            source = "task_understanding_vlm_plus_action_backend"
+        return self._label_from_semantic(
+            semantic=segment.semantic,
+            action_proposal=segment.action_proposal,
+            source=source,
+        )
+
+    def label_frame(self, frame: FrameAnnotation) -> SymbolicActionLabel:
+        return self._label_from_semantic(
+            semantic=frame.semantic,
+            action_proposal=None,
+            source="task_understanding_vlm",
+        )
+
+    def _label_from_semantic(
+        self,
+        *,
+        semantic: SemanticStep,
+        action_proposal: ActionProposal | None,
+        source: str,
+    ) -> SymbolicActionLabel:
+        description = semantic.description.lower()
         scores = {label: 0.0 for label in ActionLabel}
 
         for label, keywords in KEYWORD_SCORES.items():
@@ -33,7 +63,7 @@ class SymbolicActionLabeler:
                 if keyword in description:
                     scores[label] += 0.58
 
-        chunk_scores = self._score_action_proposal(segment.action_proposal)
+        chunk_scores = self._score_action_proposal(action_proposal)
         for label, value in chunk_scores.items():
             scores[label] += value
 
@@ -49,18 +79,14 @@ class SymbolicActionLabeler:
             best_label = ActionLabel.UNKNOWN
             confidence = round(max(confidence, 0.25), 2)
 
-        source = "task_understanding_vlm"
-        if segment.action_proposal is not None:
-            source = "task_understanding_vlm_plus_action_backend"
-
         return SymbolicActionLabel(
             label=best_label,
             confidence=confidence,
             source=source,
             evidence={
-                "description": segment.semantic.description,
-                "objects": segment.semantic.objects_involved,
-                "action_backend": segment.action_proposal.backend if segment.action_proposal else "none",
+                "description": semantic.description,
+                "objects": semantic.objects_involved,
+                "action_backend": action_proposal.backend if action_proposal else "none",
                 "chunk_scores": {label.value: value for label, value in chunk_scores.items() if value > 0.0},
             },
         )

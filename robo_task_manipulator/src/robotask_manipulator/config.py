@@ -22,8 +22,8 @@ def _parse_bool(value: str | bool | None, default: bool = False) -> bool:
 class IngestionSettings:
     """Settings for photo/video ingestion and frame extraction."""
 
-    video_frame_stride: int = 15
-    max_frames: int = 24
+    video_frame_stride: int = 1
+    max_frames: int = 0
     prefer_visual_change: bool = True
     visual_change_threshold: float = 0.18
 
@@ -42,10 +42,16 @@ class SemanticSettings:
     """Settings for semantic step understanding."""
 
     backend: str = "multimodal_vlm"
-    model_id: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
+    model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    local_model_path: str | None = None
     device: str = "cpu"
     offline: bool = False
     strict: bool = False
+    frame_context_radius: int = 1
+
+    @property
+    def model_source(self) -> str:
+        return self.local_model_path or self.model_id
 
 
 @dataclass(frozen=True)
@@ -113,6 +119,7 @@ def load_settings(config_path: str | Path | None = None) -> AppSettings:
     export_cfg = {**payload.get("export", {})}
 
     semantic_model_id = os.getenv("RTM_SEMANTIC_MODEL_ID", semantic_cfg.get("model_id", SemanticSettings.model_id))
+    semantic_model_path = os.getenv("RTM_SEMANTIC_MODEL_PATH", semantic_cfg.get("local_model_path"))
     semantic_backend = os.getenv("RTM_SEMANTIC_BACKEND", semantic_cfg.get("backend", SemanticSettings.backend))
     action_backend = os.getenv("RTM_ACTION_BACKEND", action_cfg.get("backend", ActionBackendSettings.backend))
 
@@ -141,12 +148,19 @@ def load_settings(config_path: str | Path | None = None) -> AppSettings:
         semantic=SemanticSettings(
             backend=semantic_backend,
             model_id=semantic_model_id,
+            local_model_path=semantic_model_path,
             device=os.getenv("RTM_SEMANTIC_DEVICE", semantic_cfg.get("device", SemanticSettings.device)),
             offline=_parse_bool(
                 os.getenv("RTM_SEMANTIC_OFFLINE", semantic_cfg.get("offline")),
                 default=SemanticSettings.offline,
             ),
             strict=_parse_bool(os.getenv("RTM_SEMANTIC_STRICT", semantic_cfg.get("strict")), default=SemanticSettings.strict),
+            frame_context_radius=int(
+                os.getenv(
+                    "RTM_FRAME_CONTEXT_RADIUS",
+                    semantic_cfg.get("frame_context_radius", SemanticSettings.frame_context_radius),
+                )
+            ),
         ),
         action_backend=ActionBackendSettings(
             backend=action_backend,

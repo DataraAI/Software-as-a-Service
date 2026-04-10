@@ -37,7 +37,8 @@ class RoboTaskManipulatorApp:
         self.ingestor = MediaIngestor(settings.ingestion)
         self.segmenter = Segmenter(settings.segmentation)
         self.task_understanding_service = TaskUnderstandingService(
-            build_task_understanding_backend(settings.semantic)
+            build_task_understanding_backend(settings.semantic),
+            frame_context_radius=settings.semantic.frame_context_radius,
         )
         self.labeler = SymbolicActionLabeler()
         self.action_backend = create_action_backend(settings.action_backend)
@@ -49,8 +50,13 @@ class RoboTaskManipulatorApp:
 
     def run_payload(self, payload: dict[str, Any], base_dir: str | Path) -> EpisodeOutput:
         episode = validate_episode_input(self.ingestor.from_payload(payload, base_dir))
-        segments = self.segmenter.segment(episode)
-        segments = self.task_understanding_service.annotate(episode, segments)
+        frame_predictions = self.task_understanding_service.annotate_frames(episode)
+        for frame_prediction in frame_predictions:
+            frame_prediction.symbolic_action = self.labeler.label_frame(frame_prediction)
+            frame_prediction.context_tags = self.context_tagger.annotate_frame(frame_prediction)
+            frame_prediction.success = self._infer_success(frame_prediction.context_tags)
+
+        segments = self.segmenter.summarize_frame_predictions(episode, frame_predictions)
 
         self.action_backend.load()
         for segment in segments:
@@ -58,22 +64,27 @@ class RoboTaskManipulatorApp:
             segment.action_proposal = self.action_backend.propose(episode, segment)
             segment.symbolic_action = self.labeler.label(segment)
             segment.context_tags = self.context_tagger.annotate(segment)
-            segment.success = self._infer_success(segment)
+            segment.success = self._infer_success(segment.context_tags)
 
         task_graph = self.graph_builder.build(segments)
         sim_payload = self.sim_exporter.build(episode.episode_id, episode.task_name, segments)
-        evaluation = self._evaluate_episode_if_available(episode, segments, task_graph, sim_payload)
+        evaluation = self._evaluate_episode_if_available(episode, frame_predictions, segments, task_graph, sim_payload)
 
         output = EpisodeOutput(
             episode_id=episode.episode_id,
             task_name=episode.task_name,
             instruction=episode.instruction,
             input_metadata=episode.media_metadata,
+            frame_predictions=frame_predictions,
             segments=segments,
             task_graph=task_graph,
             simulation_export=sim_payload,
             evaluation=evaluation,
-            batch_metadata={"frame_count": len(episode.frames)},
+            batch_metadata={
+                "frame_count": len(episode.frames),
+                "frame_prediction_count": len(frame_predictions),
+                "segment_count": len(segments),
+            },
         )
         return validate_episode_output(output)
 
@@ -119,15 +130,15 @@ class RoboTaskManipulatorApp:
         frame = frame_map.get(frame_index)
         return frame.state if frame is not None else None
 
-    def _infer_success(self, segment) -> bool | None:
-        failure_names = {str(tag.name) for tag in segment.context_tags}
+    def _infer_success(self, context_tags) -> bool | None:
+        failure_names = {str(tag.name) for tag in context_tags}
         if "unknown_failure" in failure_names:
             return None
         if any(name in failure_names for name in {"blocked_insertion", "dropped_object", "missed_target"}):
             return False
         return True
 
-    def _evaluate_episode_if_available(self, episode: EpisodeInput, segments, task_graph, sim_payload):
+    def _evaluate_episode_if_available(self, episode: EpisodeInput, frame_predictions, segments, task_graph, sim_payload):
         benchmark = self._benchmark_from_episode(episode)
         if benchmark is None:
             return None
@@ -136,6 +147,7 @@ class RoboTaskManipulatorApp:
             task_name=episode.task_name,
             instruction=episode.instruction,
             input_metadata=episode.media_metadata,
+            frame_predictions=frame_predictions,
             segments=segments,
             task_graph=task_graph,
             simulation_export=sim_payload,

@@ -6,6 +6,7 @@ from robotask_manipulator.schemas import (
     BenchmarkEpisode,
     BenchmarkStep,
     EpisodeOutput,
+    FrameAnnotation,
     IsaacSimExport,
     MediaMetadata,
     MediaType,
@@ -22,6 +23,24 @@ def test_episode_evaluation_summary() -> None:
         task_name="task",
         instruction="pick then place",
         input_metadata=MediaMetadata(media_type=MediaType.IMAGE, source_ref="image.jpg"),
+        frame_predictions=[
+            FrameAnnotation(
+                frame_id="frame-000",
+                episode_id="episode",
+                frame_index=0,
+                asset_ref="image.jpg",
+                semantic=SemanticStep(description="pick the object", confidence=0.8),
+                symbolic_action=SymbolicActionLabel(label=ActionLabel.PICK, confidence=0.8, source="test"),
+            ),
+            FrameAnnotation(
+                frame_id="frame-001",
+                episode_id="episode",
+                frame_index=1,
+                asset_ref="image.jpg",
+                semantic=SemanticStep(description="place the object", confidence=0.8),
+                symbolic_action=SymbolicActionLabel(label=ActionLabel.PLACE, confidence=0.8, source="test"),
+            ),
+        ],
         segments=[
             SegmentAnnotation(
                 segment_id="segment-000",

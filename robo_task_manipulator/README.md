@@ -1,6 +1,6 @@
 # RoboTaskManipulator
 
-RoboTaskManipulator is a practical v1 backend for turning photos, videos, or ordered extracted frames into conservative task steps, symbolic robot-action labels, Isaac Sim task plans, and lightweight evaluation reports.
+RoboTaskManipulator is a practical v1 backend for turning photos, videos, or ordered extracted frames into per-frame semantic predictions, grouped task summaries, conservative symbolic robot-action labels, Isaac Sim task plans, and lightweight evaluation reports.
 
 v1 is built around pretrained inference. It does not require training a new model.
 
@@ -12,8 +12,8 @@ Input:
 - explicit ordered frame-sequence payloads
 
 Output:
-- ordered task segments
-- segment-level task step descriptions from a VLM layer
+- one semantic prediction per frame
+- grouped task summaries derived from consecutive frame predictions
 - conservative symbolic action labels
 - lightweight context/failure tags
 - ordered task graph links
@@ -25,11 +25,11 @@ Output:
 ```mermaid
 flowchart TD
     A["Input media<br/>image, video, or extracted frames"] --> B["ingestion/<br/>detect media and extract frames"]
-    B --> C["segmentation/<br/>fixed-window step candidates"]
-    C --> D["task_understanding/<br/>segment-level VLM step understanding"]
-    D --> E["task_understanding/labeling.py<br/>conservative symbolic labels"]
-    E --> F["action_backend/<br/>optional pi0/OpenVLA/none proposals"]
-    F --> G["context/<br/>heuristic context and failure tags"]
+    B --> C["task_understanding/<br/>rolling-window VLM prediction per frame"]
+    C --> D["task_understanding/labeling.py<br/>conservative per-frame symbolic labels"]
+    D --> E["context/<br/>per-frame context and failure tags"]
+    E --> F["segmentation/<br/>group consecutive frame predictions into summaries"]
+    F --> G["action_backend/<br/>optional pi0/OpenVLA/none proposals on summaries"]
     G --> H["graph/<br/>ordered task graph"]
     H --> I["simulation/<br/>Isaac Sim Franka export"]
     I --> J["export/<br/>episode JSON + raw debug + manifest"]
@@ -41,8 +41,9 @@ flowchart TD
 Semantic understanding:
 - primary engine for v1
 - implemented through `task_understanding/`
-- default backend is a pretrained multimodal instruction VLM (`HuggingFaceTB/SmolVLM2-500M-Video-Instruct`)
-- it receives multiple ordered frames from each segment, not just one representative frame
+- default backend is a pretrained multimodal instruction VLM (`Qwen/Qwen2.5-VL-7B-Instruct`)
+- it runs one prediction per frame using a small rolling context window
+- it can load from a Hugging Face id or a local downloaded model directory on a Lambda VM
 - if the VLM is unavailable, the code falls back to conservative visual heuristics instead of fabricating certainty
 
 Action backend:
@@ -59,8 +60,8 @@ Action backend:
 - `docs/`: architecture notes and project-specific guidance
 - `scripts/`: runnable entry points for single inference, batch annotation, and evaluation
 - `src/robotask_manipulator/ingestion/`: media detection and frame extraction
-- `src/robotask_manipulator/segmentation/`: deterministic temporal segmentation
-- `src/robotask_manipulator/task_understanding/`: segment-level semantic VLM backend plus symbolic labeling
+- `src/robotask_manipulator/segmentation/`: grouped step summaries derived from frame predictions
+- `src/robotask_manipulator/task_understanding/`: frame-level semantic VLM backend plus symbolic labeling
 - `src/robotask_manipulator/action_backend/`: optional robot-oriented backends such as pi0
 - `src/robotask_manipulator/context/`: context and failure tagging
 - `src/robotask_manipulator/graph/`: ordered task graph construction
@@ -102,8 +103,9 @@ Frame sequence:
 
 Video:
 - provide `asset_path` or `media_path` pointing to a video file
-- v1 extracts frames with a simple configurable stride
-- raw video decoding is supported through OpenCV-based extraction, but explicit extracted frames are still the easiest path for clean evaluation
+- v1 can process every frame by default
+- set `video_frame_stride` if you want to downsample intentionally
+- raw video decoding is supported through OpenCV-based extraction
 
 ## Running It
 
@@ -126,10 +128,21 @@ That installs the base stack for:
 Optional `pi0` support is intentionally not required for this workflow.
 If you enable `pi0` later, treat it as a separate optional environment and capability path.
 
+Download a semantic model locally for Lambda or any offline VM:
+
+```bash
+py -3 scripts\download_semantic_model.py ^
+  --model-id Qwen/Qwen2.5-VL-7B-Instruct ^
+  --output-dir C:\models\Qwen2.5-VL-7B-Instruct
+```
+
 Single inference:
 
 ```bash
-py -3 scripts\run_single_inference.py --input data\sample_inputs\sample_workflow_episode_001.json
+py -3 scripts\run_single_inference.py ^
+  --input data\sample_inputs\sample_workflow_episode_001.json ^
+  --semantic-model-path C:\models\Qwen2.5-VL-7B-Instruct ^
+  --semantic-offline
 ```
 
 Use real pi0 proposals:
@@ -176,8 +189,10 @@ Config can come from:
 Useful env vars:
 - `RTM_SEMANTIC_BACKEND`
 - `RTM_SEMANTIC_MODEL_ID`
+- `RTM_SEMANTIC_MODEL_PATH`
 - `RTM_SEMANTIC_DEVICE`
 - `RTM_SEMANTIC_OFFLINE`
+- `RTM_FRAME_CONTEXT_RADIUS`
 - `RTM_ACTION_BACKEND`
 - `PI0_MODEL_ID`
 - `PI0_CHECKPOINT_PATH`
@@ -200,6 +215,10 @@ Each exported step includes:
 - optional action proposal
 - context/failure tags
 
+The main episode JSON also includes:
+- `frame_predictions`: one semantic result per frame
+- `segments`: grouped summaries derived from consecutive frame predictions
+
 The exporter is intentionally focused on generating clean structured plans, not directly launching Isaac Sim.
 
 ## Evaluation Flow
@@ -221,11 +240,11 @@ Reports are written as:
 
 ## Known Limitations
 
-- Semantic understanding is now segment-level and VLM-driven, but it is still conservative and not guaranteed to hit benchmark-quality step descriptions on every real video.
-- The default video-capable multimodal VLM is practical for testing, but stronger models may still be needed for higher accuracy on subtle real hand-manipulation tasks.
+- Semantic understanding is frame-first and VLM-driven, but it is still conservative and not guaranteed to hit benchmark-quality step descriptions on every real video.
+- `Qwen/Qwen2.5-VL-7B-Instruct` is significantly heavier than the earlier small demo model and is best run on a capable local GPU VM.
 - `pi0` proposals are optional and embodiment-sensitive.
 - Optional `pi0` support should be treated as a separate capability path, not part of the default semantic-testing environment.
-- Video segmentation is heuristic and window-based rather than learned.
+- Grouped step summaries are still heuristic and derived from consecutive per-frame predictions rather than a learned temporal summarizer.
 - Context/failure tags are lightweight heuristics and do not imply true physics certainty.
 - Isaac Sim export is plan-oriented; direct sim execution is intentionally out of scope for v1.
 - `OpenVLA` is represented as a clean backend slot but is not wired up in this build.
@@ -233,7 +252,8 @@ Reports are written as:
 ## Current Default Behavior
 
 - semantic understanding: enabled
-- segment-level task understanding: enabled
+- per-frame task understanding: enabled
+- grouped summary segments: enabled
 - symbolic labeling: enabled
 - action backend: `none`
 - Isaac Sim export: enabled
