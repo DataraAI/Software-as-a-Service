@@ -54,7 +54,7 @@ def mask_generation(video_path: str, segment: str = "humans"):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video_path", type=str, help="video_path")
+    parser.add_argument("--video_path", type=Path, help="Path to the input .mp4 file")
     parser.add_argument("--segment", type=str, help="segment")
     
     args = parser.parse_args()
