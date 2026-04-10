@@ -162,6 +162,21 @@ py -3 scripts\run_single_inference.py ^
   --semantic-offline
 ```
 
+Colab-friendly real image/video demo:
+
+```bash
+py -3 scripts\run_colab_video_demo.py ^
+  --image-path test_image.jpg ^
+  --video-path test_video.mp4 ^
+  --config configs\colab_refined_video.yaml ^
+  --task-name ethernet_cable_insert ^
+  --instruction "Describe only the visible hand-object action conservatively." ^
+  --tag "ethernet cable" ^
+  --tag "laptop port" ^
+  --tag "network connector" ^
+  --zip-outputs
+```
+
 Use real pi0 proposals:
 
 ```bash
@@ -222,6 +237,7 @@ Useful env vars:
 - `PI0_OFFLINE`
 
 For Colab or Lambda-style video testing, see `configs/colab_refined_video.yaml` for a practical starting point that keeps Qwen on GPU while downsampling longer videos and producing cleaner grouped segments.
+The repo also includes `scripts/run_colab_video_demo.py` plus `colab_refined_video_test.ipynb` as a thin Colab wrapper around that demo script.
 
 ## Isaac Sim Export
 
