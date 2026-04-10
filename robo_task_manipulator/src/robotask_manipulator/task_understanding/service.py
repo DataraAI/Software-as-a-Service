@@ -32,6 +32,8 @@ class TaskUnderstandingService:
                 instruction=episode.instruction,
                 step_index=frame_index,
                 total_steps=total_frames,
+                task_name=episode.task_name,
+                metadata=episode.metadata,
             )
             semantic = SemanticStep(
                 description=prediction.description,
@@ -74,6 +76,8 @@ class TaskUnderstandingService:
                 instruction=episode.instruction,
                 step_index=segment.step_index,
                 total_steps=len(segments),
+                task_name=episode.task_name,
+                metadata=episode.metadata,
             )
             segment.semantic = SemanticStep(
                 description=prediction.description,

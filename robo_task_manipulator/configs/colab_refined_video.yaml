@@ -1,21 +1,21 @@
 ingestion:
   video_frame_stride: 1
-  long_video_frame_count_threshold: 0
-  long_video_frame_stride: 1
+  long_video_frame_count_threshold: 240
+  long_video_frame_stride: 3
   max_frames: 0
   prefer_visual_change: true
-  visual_change_threshold: 0.18
+  visual_change_threshold: 0.16
 
 segmentation:
-  frames_per_segment: 4
+  frames_per_segment: 6
   use_visual_change_breaks: true
-  visual_change_threshold: 0.18
+  visual_change_threshold: 0.14
 
 semantic:
   backend: multimodal_vlm
   model_id: Qwen/Qwen2.5-VL-7B-Instruct
   local_model_path: null
-  device: cpu
+  device: cuda
   offline: false
   strict: false
   frame_context_radius: 1

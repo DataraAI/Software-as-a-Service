@@ -105,7 +105,24 @@ Video:
 - provide `asset_path` or `media_path` pointing to a video file
 - v1 can process every frame by default
 - set `video_frame_stride` if you want to downsample intentionally
+- set `long_video_frame_count_threshold` plus `long_video_frame_stride` if you want long clips to downsample automatically
 - raw video decoding is supported through OpenCV-based extraction
+
+Hinted video payload:
+
+```json
+{
+  "episode_id": "real-video-001",
+  "task_name": "ethernet_cable_insert",
+  "instruction": "Describe only the visible hand-object action conservatively.",
+  "asset_path": "test_video.mp4",
+  "metadata": {
+    "tags": ["ethernet cable", "laptop port", "network connector"]
+  }
+}
+```
+
+Those metadata tags are treated as soft hints for the semantic model. They help the model prefer phrases like `hold cable near port` or `insert cable into port` when the frames support them, but they do not hard-force the label.
 
 ## Running It
 
@@ -187,6 +204,10 @@ Config can come from:
 - CLI overrides
 
 Useful env vars:
+- `RTM_VIDEO_FRAME_STRIDE`
+- `RTM_LONG_VIDEO_FRAME_COUNT_THRESHOLD`
+- `RTM_LONG_VIDEO_FRAME_STRIDE`
+- `RTM_MAX_FRAMES`
 - `RTM_SEMANTIC_BACKEND`
 - `RTM_SEMANTIC_MODEL_ID`
 - `RTM_SEMANTIC_MODEL_PATH`
@@ -199,6 +220,8 @@ Useful env vars:
 - `PI0_DEVICE`
 - `PI0_DTYPE`
 - `PI0_OFFLINE`
+
+For Colab or Lambda-style video testing, see `configs/colab_refined_video.yaml` for a practical starting point that keeps Qwen on GPU while downsampling longer videos and producing cleaner grouped segments.
 
 ## Isaac Sim Export
 

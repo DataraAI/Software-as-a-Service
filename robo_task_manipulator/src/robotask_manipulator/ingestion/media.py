@@ -100,18 +100,18 @@ class MediaIngestor:
 
     def _ingest_video(self, video_path: Path, metadata: dict[str, Any]) -> tuple[list[FrameObservation], MediaMetadata]:
         asset = ensure_asset_exists(video_path)
-        frames, fps = self._extract_video_frames(asset)
+        frames, fps, extraction_metadata = self._extract_video_frames(asset)
         media_metadata = MediaMetadata(
             media_type=MediaType.VIDEO,
             source_ref=str(asset),
             fps=fps,
             frame_count=len(frames),
             duration_s=(len(frames) / fps) if fps else None,
-            metadata=metadata,
+            metadata={**metadata, **extraction_metadata},
         )
         return frames, media_metadata
 
-    def _extract_video_frames(self, video_path: Path) -> tuple[list[FrameObservation], float | None]:
+    def _extract_video_frames(self, video_path: Path) -> tuple[list[FrameObservation], float | None, dict[str, Any]]:
         try:
             import cv2
         except ImportError as exc:  # pragma: no cover
@@ -123,10 +123,11 @@ class MediaIngestor:
         if not capture.isOpened():
             raise InvalidInputError(f"Unable to open video input: {video_path}")
         fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0) or None
+        source_frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         frames: list[FrameObservation] = []
         frame_index = 0
         saved_index = 0
-        stride = max(1, self.settings.video_frame_stride)
+        stride = self._resolve_video_stride(source_frame_count)
         output_dir = video_path.parent / f"{video_path.stem}_frames"
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -152,10 +153,28 @@ class MediaIngestor:
             frame_index += 1
 
         capture.release()
-        LOGGER.info("Extracted %s frames from %s", len(frames), video_path.name)
+        LOGGER.info(
+            "Extracted %s frames from %s using stride=%s source_frame_count=%s",
+            len(frames),
+            video_path.name,
+            stride,
+            source_frame_count or "unknown",
+        )
         if not frames:
             raise InvalidInputError(f"No frames were extracted from video input: {video_path}")
-        return frames, fps
+        return frames, fps, {
+            "source_frame_count": source_frame_count or None,
+            "extraction_stride": stride,
+            "frames_extracted": len(frames),
+        }
+
+    def _resolve_video_stride(self, source_frame_count: int | None) -> int:
+        stride = max(1, self.settings.video_frame_stride)
+        threshold = max(0, self.settings.long_video_frame_count_threshold)
+        long_stride = max(1, self.settings.long_video_frame_stride)
+        if threshold and source_frame_count and source_frame_count >= threshold:
+            stride = max(stride, long_stride)
+        return stride
 
     def _detect_media_type(self, path: Path) -> MediaType:
         suffix = path.suffix.lower()

@@ -15,7 +15,7 @@ KEYWORD_SCORES: dict[ActionLabel, tuple[str, ...]] = {
     ActionLabel.PICK: ("pick", "grasp", "lift", "grab", "take out", "remove"),
     ActionLabel.PLACE: ("place", "put", "set", "deposit"),
     ActionLabel.ALIGN: ("align", "position", "line up"),
-    ActionLabel.INSERT: ("insert", "slot", "fit", "plug"),
+    ActionLabel.INSERT: ("insert", "slot", "fit", "plug", "connect"),
     ActionLabel.FASTEN: ("fasten", "tighten", "screw", "bolt"),
     ActionLabel.PUSH: ("push", "press"),
     ActionLabel.PULL: ("pull", "draw", "peel", "open"),

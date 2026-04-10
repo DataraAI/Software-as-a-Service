@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import re
@@ -9,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 from PIL import Image
 
 from robotask_manipulator.config import SemanticSettings
@@ -103,19 +105,39 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
         instruction: str,
         step_index: int,
         total_steps: int,
+        task_name: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> SemanticPrediction:
         self.load()
-        sampled_paths = _sample_frame_paths(frame_paths)
+        sampled_paths = _sample_frame_paths(
+            frame_paths,
+            max_samples=_max_sampled_frames(self._pipeline_mode),
+        )
+        context_hints = _collect_context_hints(task_name, metadata)
         motion_score = _estimate_motion(sampled_paths)
         frame_captions: list[str] = []
         raw_text: str | None = None
         confidence = 0.3
 
         if self._model and self._pipeline_mode == "direct-image-text-to-text":
-            raw_text = self._predict_direct_multiframe(sampled_paths, instruction, step_index, total_steps)
+            raw_text = self._predict_direct_multiframe(
+                sampled_paths,
+                instruction,
+                step_index,
+                total_steps,
+                task_name=task_name,
+                context_hints=context_hints,
+            )
             confidence = 0.82 if raw_text else 0.35
         elif self._pipeline and self._pipeline_mode == "image-text-to-text":
-            raw_text = self._predict_multiframe(sampled_paths, instruction, step_index, total_steps)
+            raw_text = self._predict_multiframe(
+                sampled_paths,
+                instruction,
+                step_index,
+                total_steps,
+                task_name=task_name,
+                context_hints=context_hints,
+            )
             confidence = 0.78 if raw_text else 0.35
         elif self._pipeline and self._pipeline_mode == "image-to-text":
             frame_captions = self._caption_frames(sampled_paths)
@@ -144,7 +166,11 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
                 "motion_score": motion_score,
                 "step_index": step_index,
                 "total_steps": total_steps,
-                "used_instruction_only_as_context": True,
+                "task_name": task_name,
+                "context_hints": context_hints,
+                "used_instruction_only_as_context": not bool(
+                    context_hints or (task_name and not _is_generic_hint(task_name))
+                ),
                 "raw_semantic_response": raw_text,
             },
         )
@@ -199,37 +225,42 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
         instruction: str,
         step_index: int,
         total_steps: int,
+        *,
+        task_name: str | None = None,
+        context_hints: list[str] | None = None,
     ) -> str | None:
-        images = _load_images(sampled_paths)
-        if not images:
-            return None
-
-        prompt = (
-            "These are ordered frames from one short segment of a human hand manipulation task. "
-            "Describe only the single main visible action happening across these frames in 2 to 6 words. "
-            "Focus on the hands, the manipulated object, and any clear source or target. "
-            "Prefer specific actions such as align connector, insert cable, hold connector, inspect port, remove tray, or tighten fastener when clearly visible. "
-            "Do not repeat the full task instruction unless it is visually supported by the frames. "
-            "If the action is unclear, answer exactly 'unclear action'. "
-            f"Task context: {instruction}. Segment position: {step_index + 1} of {total_steps}."
+        prompt = _build_semantic_prompt(
+            instruction,
+            step_index,
+            total_steps,
+            task_name=task_name,
+            context_hints=context_hints,
         )
-        messages = [
-            {
-                "role": "user",
-                "content": [{"type": "image"} for _ in images] + [{"type": "text", "text": prompt}],
-            }
-        ]
-        try:
-            outputs = self._pipeline(
-                text=messages,
-                images=images,
-                max_new_tokens=64,
-                return_full_text=False,
-            )
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("Multiframe VLM inference failed for frames=%s: %s", sampled_paths, exc)
-            return None
-        return _coerce_generated_text(outputs)
+        for candidate_paths in _candidate_frame_path_sets(sampled_paths):
+            images = _load_images(candidate_paths)
+            if not images:
+                continue
+            messages = [
+                {
+                    "role": "user",
+                    "content": [{"type": "image"} for _ in images] + [{"type": "text", "text": prompt}],
+                }
+            ]
+            try:
+                outputs = self._pipeline(
+                    text=messages,
+                    images=images,
+                    max_new_tokens=24,
+                    return_full_text=False,
+                )
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("Multiframe VLM inference failed for frames=%s: %s", candidate_paths, exc)
+                if _is_cuda_oom(exc):
+                    _release_cuda_memory(self.settings.device, aggressive=True)
+                    continue
+                return None
+            return _coerce_generated_text(outputs)
+        return None
 
     def _caption_frames(self, sampled_paths: list[str]) -> list[str]:
         captions: list[str] = []
@@ -250,76 +281,119 @@ class TransformersTaskUnderstandingBackend(BaseTaskUnderstandingBackend):
         instruction: str,
         step_index: int,
         total_steps: int,
+        *,
+        task_name: str | None = None,
+        context_hints: list[str] | None = None,
     ) -> str | None:
         if not self._processor or not self._model:
             return None
 
-        prompt = (
-            "These are ordered frames from one short segment of a human hand manipulation task. "
-            "Describe only the single main visible action happening across these frames in 2 to 6 words. "
-            "Focus on the hands, the manipulated object, and any clear source or target. "
-            "Prefer specific actions such as align connector, insert cable, hold connector, inspect port, "
-            "remove tray, or tighten fastener when clearly visible. "
-            "Do not repeat the full task instruction unless it is visually supported by the frames. "
-            "If the action is unclear, answer exactly 'unclear action'. "
-            f"Task context: {instruction}. Segment position: {step_index + 1} of {total_steps}."
+        prompt = _build_semantic_prompt(
+            instruction,
+            step_index,
+            total_steps,
+            task_name=task_name,
+            context_hints=context_hints,
         )
-        messages = [
-            {
-                "role": "user",
-                "content": (
-                    [{"type": "image", "path": frame_path} for frame_path in sampled_paths]
-                    + [{"type": "text", "text": prompt}]
-                ),
-            }
-        ]
 
-        try:
-            inputs = self._processor.apply_chat_template(
-                messages,
-                add_generation_prompt=True,
-                tokenize=True,
-                return_dict=True,
-                return_tensors="pt",
-            )
-            if self._model_dtype is not None:
-                inputs = inputs.to(self._model.device, dtype=self._model_dtype)
-            else:
-                inputs = inputs.to(self._model.device)
-            generated_ids = self._model.generate(
-                **inputs,
-                do_sample=False,
-                max_new_tokens=48,
-            )
-            if "input_ids" in inputs:
-                prompt_length = inputs["input_ids"].shape[1]
-                generated_ids = generated_ids[:, prompt_length:]
-            generated_texts = self._processor.batch_decode(
-                generated_ids,
-                skip_special_tokens=True,
-            )
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("Direct multiframe VLM inference failed for frames=%s: %s", sampled_paths, exc)
-            return None
+        for candidate_paths in _candidate_frame_path_sets(sampled_paths):
+            messages = [
+                {
+                    "role": "user",
+                    "content": (
+                        [{"type": "image", "path": frame_path} for frame_path in candidate_paths]
+                        + [{"type": "text", "text": prompt}]
+                    ),
+                }
+            ]
+            inputs = None
+            generated_ids = None
+            generated_texts = None
+            decoded_text = None
+            try:
+                with torch.inference_mode():
+                    inputs = self._processor.apply_chat_template(
+                        messages,
+                        add_generation_prompt=True,
+                        tokenize=True,
+                        return_dict=True,
+                        return_tensors="pt",
+                    )
+                    if self._model_dtype is not None:
+                        inputs = inputs.to(self._model.device, dtype=self._model_dtype)
+                    else:
+                        inputs = inputs.to(self._model.device)
+                    generated_ids = self._model.generate(
+                        **inputs,
+                        do_sample=False,
+                        max_new_tokens=24,
+                    )
+                if "input_ids" in inputs:
+                    prompt_length = inputs["input_ids"].shape[1]
+                    generated_ids = generated_ids[:, prompt_length:]
+                generated_texts = self._processor.batch_decode(
+                    generated_ids,
+                    skip_special_tokens=True,
+                )
+                decoded_text = generated_texts[0] if generated_texts else None
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("Direct multiframe VLM inference failed for frames=%s: %s", candidate_paths, exc)
+                if _is_cuda_oom(exc):
+                    _release_cuda_memory(self._model_device, aggressive=True)
+                    continue
+                return None
+            finally:
+                del inputs
+                del generated_ids
+                del generated_texts
+                _release_cuda_memory(self._model_device)
 
-        if not generated_texts:
-            return None
-        return _strip_assistant_prefix(generated_texts[0])
+            if not decoded_text:
+                continue
+            return _strip_assistant_prefix(decoded_text)
+        return None
 
 
-def _sample_frame_paths(frame_paths: list[str]) -> list[str]:
+def _sample_frame_paths(frame_paths: list[str], max_samples: int = 6) -> list[str]:
     unique_paths = []
     for path in frame_paths:
         if path not in unique_paths:
             unique_paths.append(path)
-    if len(unique_paths) <= 6:
+    max_samples = max(1, max_samples)
+    if len(unique_paths) <= max_samples:
         return unique_paths
-    max_samples = 6
+    if max_samples == 1:
+        return [unique_paths[len(unique_paths) // 2]]
     indices = {
         round(index * (len(unique_paths) - 1) / (max_samples - 1))
         for index in range(max_samples)
     }
     return [unique_paths[index] for index in sorted(indices)]
+
+
+def _max_sampled_frames(pipeline_mode: str) -> int:
+    if pipeline_mode == "direct-image-text-to-text":
+        return 3
+    if pipeline_mode == "image-text-to-text":
+        return 4
+    return 6
+
+
+def _candidate_frame_path_sets(frame_paths: list[str]) -> list[list[str]]:
+    candidates = [
+        _sample_frame_paths(frame_paths, max_samples=len(frame_paths)),
+        _sample_frame_paths(frame_paths, max_samples=3),
+        _sample_frame_paths(frame_paths, max_samples=2),
+        _sample_frame_paths(frame_paths, max_samples=1),
+    ]
+    deduped: list[list[str]] = []
+    seen: set[tuple[str, ...]] = set()
+    for candidate in candidates:
+        key = tuple(candidate)
+        if candidate and key not in seen:
+            seen.add(key)
+            deduped.append(candidate)
+    return deduped
 
 
 def _prefers_direct_model_path(model_source: str, local_model_path: str | None = None) -> bool:
@@ -396,11 +470,16 @@ def _strip_assistant_prefix(text: str | None) -> str | None:
 def _normalize_step_description(raw_text: str | None) -> str | None:
     if not raw_text:
         return None
-    text = raw_text.strip()
+    text = _strip_assistant_prefix(raw_text) or raw_text.strip()
     text = re.sub(r"^step_description\s*:\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"^main visible step\s*:\s*", "", text, flags=re.IGNORECASE)
-    text = text.split("\n", 1)[0].strip()
-    text = text.strip(" .")
+    text = re.split(r"\n+", text, maxsplit=1)[0].strip()
+    text = _select_best_action_clause(text)
+    text = re.sub(r"\b(the person|person|human hand|hand is|hand appears to be)\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(a|an|the)\b", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip(" .,:;!-")
+    text = _normalize_leading_action(text)
+    text = _trim_action_phrase(text)
     if not text:
         return None
     if text.lower() in {"unclear", "unclear action", "unknown action"}:
@@ -422,12 +501,175 @@ def _summarize_caption_sequence(frame_captions: list[str], motion_score: float) 
 
 def _heuristic_step_description(motion_score: float, step_index: int, total_steps: int) -> str:
     if motion_score < 0.01:
-        return "pause or hold object"
+        return "hold object"
     if step_index == 0 and total_steps > 1:
         return "begin hand-object manipulation"
     if step_index == total_steps - 1 and total_steps > 1:
         return "finish hand-object manipulation"
     return "hand manipulates object"
+
+
+def _build_semantic_prompt(
+    instruction: str,
+    step_index: int,
+    total_steps: int,
+    *,
+    task_name: str | None = None,
+    context_hints: list[str] | None = None,
+) -> str:
+    hints = list(context_hints or [])
+    prompt_parts = [
+        "You are labeling ordered frames from a real-world manipulation video.",
+        "Return exactly one short lower-case action phrase between 2 and 6 words.",
+        "Describe only the single visible hand-object action happening across these frames.",
+        "Prefer concrete phrasing in the form verb object [preposition target].",
+        (
+            "Good examples: hold cable near port, align connector with socket, insert cable into port, "
+            "tighten bolt, place container on shelf, wipe surface, open drawer, pick up tool."
+        ),
+        "If the hand is mainly maintaining contact, prefer a hold phrase over a generic manipulate phrase.",
+        "Use the task description or tags only as soft hints and only when they are visually supported.",
+        "If the action is unclear, answer exactly 'unclear action'.",
+        f"Task description: {instruction.strip()}",
+    ]
+    if task_name and not _is_generic_hint(task_name):
+        prompt_parts.append(f"Optional task label: {task_name.strip()}")
+    if hints:
+        prompt_parts.append(f"Optional hints: {', '.join(hints)}")
+    prompt_parts.append(f"Frame window position: {step_index + 1} of {total_steps}.")
+    return " ".join(part.strip() for part in prompt_parts if part and part.strip())
+
+
+def _collect_context_hints(task_name: str | None, metadata: dict[str, Any] | None) -> list[str]:
+    hints: list[str] = []
+    if not metadata:
+        return hints
+
+    for key in ("tags", "labels", "objects", "object_tags", "activities", "activity_tags", "tools", "locations"):
+        value = metadata.get(key)
+        if isinstance(value, list):
+            hints.extend(_clean_hint_text(item) for item in value if str(item).strip())
+        elif isinstance(value, str) and value.strip():
+            hints.append(_clean_hint_text(value))
+
+    for key in ("description", "summary", "scene", "environment"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            hints.append(_clean_hint_text(value))
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for hint in hints:
+        lowered = hint.lower()
+        if hint and lowered not in seen and not _is_generic_hint(hint):
+            seen.add(lowered)
+            deduped.append(hint)
+    return deduped[:8]
+
+
+def _clean_hint_text(value: Any) -> str:
+    text = str(value).replace("_", " ").strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def _is_generic_hint(value: str) -> bool:
+    tokens = [token for token in re.split(r"[^a-z0-9]+", value.lower()) if token]
+    if not tokens:
+        return True
+    generic = {"test", "video", "image", "task", "demo", "sample", "real", "clip"}
+    return all(token in generic for token in tokens)
+
+
+def _select_best_action_clause(text: str) -> str:
+    clauses = [
+        clause.strip()
+        for clause in re.split(r"[;\n]|,\s+|\.\s+|\s+then\s+|\s+and\s+", text)
+        if clause.strip()
+    ]
+    if not clauses:
+        return text
+    return max(clauses, key=_action_clause_score)
+
+
+def _action_clause_score(text: str) -> tuple[int, int]:
+    lowered = text.lower()
+    score = 0
+    for keyword, weight in {
+        "insert": 8,
+        "plug": 8,
+        "connect": 7,
+        "align": 6,
+        "position": 5,
+        "tighten": 6,
+        "fasten": 6,
+        "pick": 5,
+        "place": 5,
+        "hold": 4,
+        "inspect": 4,
+        "check": 4,
+        "open": 4,
+        "close": 4,
+        "wipe": 4,
+        "move": 2,
+        "manipulate": 1,
+    }.items():
+        if keyword in lowered:
+            score += weight
+    if any(token in lowered for token in {"into", "onto", "with", "near", "from"}):
+        score += 2
+    if any(token in lowered for token in {"prepare", "about to", "appears to", "trying to"}):
+        score -= 3
+    return score, len(lowered)
+
+
+def _normalize_leading_action(text: str) -> str:
+    lowered = text.lower()
+    substitutions = {
+        r"^holding\b": "hold",
+        r"^plugging in\b": "plug",
+        r"^plugging\b": "plug",
+        r"^inserting\b": "insert",
+        r"^aligning\b": "align",
+        r"^positioning\b": "position",
+        r"^placing\b": "place",
+        r"^picking up\b": "pick up",
+        r"^picking\b": "pick",
+        r"^moving\b": "move",
+        r"^inspecting\b": "inspect",
+        r"^checking\b": "check",
+        r"^tightening\b": "tighten",
+        r"^fastening\b": "fasten",
+        r"^connecting\b": "connect",
+    }
+    for pattern, replacement in substitutions.items():
+        if re.search(pattern, lowered):
+            return re.sub(pattern, replacement, lowered, count=1)
+    return lowered
+
+
+def _trim_action_phrase(text: str, max_words: int = 8) -> str:
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    return " ".join(words[:max_words])
+
+
+def _is_cuda_oom(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "out of memory" in message or "cuda oom" in message
+
+
+def _release_cuda_memory(device: str | None, aggressive: bool = False) -> None:
+    if not device or not str(device).startswith("cuda"):
+        return
+    if aggressive:
+        gc.collect()
+    try:
+        import torch
+    except ImportError:  # pragma: no cover
+        return
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def _extract_source_target(text: str) -> tuple[str | None, str | None]:

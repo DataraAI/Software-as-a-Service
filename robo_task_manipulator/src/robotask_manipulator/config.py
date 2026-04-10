@@ -23,6 +23,8 @@ class IngestionSettings:
     """Settings for photo/video ingestion and frame extraction."""
 
     video_frame_stride: int = 1
+    long_video_frame_count_threshold: int = 0
+    long_video_frame_stride: int = 1
     max_frames: int = 0
     prefer_visual_change: bool = True
     visual_change_threshold: float = 0.18
@@ -125,8 +127,28 @@ def load_settings(config_path: str | Path | None = None) -> AppSettings:
 
     return AppSettings(
         ingestion=IngestionSettings(
-            video_frame_stride=int(ingestion_cfg.get("video_frame_stride", IngestionSettings.video_frame_stride)),
-            max_frames=int(ingestion_cfg.get("max_frames", IngestionSettings.max_frames)),
+            video_frame_stride=int(
+                os.getenv(
+                    "RTM_VIDEO_FRAME_STRIDE",
+                    ingestion_cfg.get("video_frame_stride", IngestionSettings.video_frame_stride),
+                )
+            ),
+            long_video_frame_count_threshold=int(
+                os.getenv(
+                    "RTM_LONG_VIDEO_FRAME_COUNT_THRESHOLD",
+                    ingestion_cfg.get(
+                        "long_video_frame_count_threshold",
+                        IngestionSettings.long_video_frame_count_threshold,
+                    ),
+                )
+            ),
+            long_video_frame_stride=int(
+                os.getenv(
+                    "RTM_LONG_VIDEO_FRAME_STRIDE",
+                    ingestion_cfg.get("long_video_frame_stride", IngestionSettings.long_video_frame_stride),
+                )
+            ),
+            max_frames=int(os.getenv("RTM_MAX_FRAMES", ingestion_cfg.get("max_frames", IngestionSettings.max_frames))),
             prefer_visual_change=_parse_bool(
                 ingestion_cfg.get("prefer_visual_change"),
                 default=IngestionSettings.prefer_visual_change,

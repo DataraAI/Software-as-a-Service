@@ -35,5 +35,7 @@ class BaseTaskUnderstandingBackend(ABC):
         instruction: str,
         step_index: int,
         total_steps: int,
+        task_name: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> SemanticPrediction:
         """Produce a structured semantic step prediction from ordered frames."""

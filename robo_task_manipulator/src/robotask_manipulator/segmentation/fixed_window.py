@@ -72,6 +72,7 @@ class Segmenter:
                 groups.append(current_group)
                 current_group = [frame_prediction]
         groups.append(current_group)
+        groups = self._merge_summary_groups(groups)
 
         segments: list[SegmentAnnotation] = []
         for step_index, group in enumerate(groups):
@@ -97,6 +98,7 @@ class Segmenter:
                 raw_outputs={
                     "frame_prediction_ids": [frame.frame_id for frame in group],
                     "merged_from_frames": len(group),
+                    "grouping": self._grouping_reason(group),
                 },
             )
             segments.append(segment)
@@ -137,8 +139,137 @@ class Segmenter:
             and left.symbolic_action.label == right.symbolic_action.label
         )
 
+    def _merge_summary_groups(self, groups: list[list[FrameAnnotation]]) -> list[list[FrameAnnotation]]:
+        if len(groups) <= 1:
+            return groups
+
+        merged = [list(group) for group in groups]
+        changed = True
+        while changed:
+            changed = False
+
+            index = 1
+            while index < len(merged) - 1:
+                left = merged[index - 1]
+                middle = merged[index]
+                right = merged[index + 1]
+                if self._should_merge_bridge_group(left, middle, right):
+                    merged[index - 1] = left + middle + right
+                    del merged[index : index + 2]
+                    changed = True
+                    continue
+                index += 1
+
+            if changed:
+                continue
+
+            index = 0
+            while index < len(merged) - 1:
+                left = merged[index]
+                right = merged[index + 1]
+                if self._should_merge_adjacent_groups(left, right):
+                    merged[index] = left + right
+                    del merged[index + 1]
+                    changed = True
+                    continue
+                index += 1
+        return merged
+
+    def _should_merge_bridge_group(
+        self,
+        left: list[FrameAnnotation],
+        middle: list[FrameAnnotation],
+        right: list[FrameAnnotation],
+    ) -> bool:
+        if not self._is_generic_group(middle):
+            return False
+
+        if self._is_generic_group(left) and self._is_generic_group(right):
+            return True
+
+        if self._same_summary_group(left[-1], right[0]):
+            return True
+
+        if self._group_frame_count(middle) <= self._short_generic_group_limit():
+            if self._is_generic_group(left) != self._is_generic_group(right):
+                return True
+            if not self._is_generic_group(left) and not self._is_generic_group(right):
+                return self._group_label(left) == self._group_label(right)
+        return False
+
+    def _should_merge_adjacent_groups(
+        self,
+        left: list[FrameAnnotation],
+        right: list[FrameAnnotation],
+    ) -> bool:
+        left_generic = self._is_generic_group(left)
+        right_generic = self._is_generic_group(right)
+
+        if left_generic and right_generic:
+            return True
+
+        if left_generic and self._group_frame_count(left) <= self._short_generic_group_limit():
+            return True
+
+        if right_generic and self._group_frame_count(right) <= self._short_generic_group_limit():
+            return True
+
+        return False
+
+    def _is_generic_group(self, group: list[FrameAnnotation]) -> bool:
+        best_frame = self._best_summary_frame(group)
+        return self._is_generic_frame(best_frame)
+
+    def _group_description(self, group: list[FrameAnnotation]) -> str:
+        return self._best_summary_frame(group).semantic.description
+
+    def _group_label(self, group: list[FrameAnnotation]) -> ActionLabel:
+        return ActionLabel(str(self._best_summary_frame(group).symbolic_action.label))
+
+    def _group_confidence(self, group: list[FrameAnnotation]) -> float:
+        return mean(frame.semantic.confidence for frame in group)
+
+    def _group_frame_count(self, group: list[FrameAnnotation]) -> int:
+        return len(group)
+
+    def _short_generic_group_limit(self) -> int:
+        return max(3, self.settings.frames_per_segment)
+
+    def _grouping_reason(self, group: list[FrameAnnotation]) -> str:
+        return "generic_bridge_merge" if self._is_generic_group(group) and len(group) > 1 else "consecutive_equal_description_and_label"
+
+    def _best_summary_frame(self, group: list[FrameAnnotation]) -> FrameAnnotation:
+        return max(
+            group,
+            key=lambda frame: (
+                0 if self._is_generic_frame(frame) else 1,
+                frame.symbolic_action.confidence,
+                frame.semantic.confidence,
+                len(frame.semantic.description.split()),
+            ),
+        )
+
+    def _is_generic_frame(self, frame: FrameAnnotation) -> bool:
+        description = frame.semantic.description
+        label = ActionLabel(str(frame.symbolic_action.label))
+        confidence = frame.semantic.confidence
+        if description in {
+            "hand manipulates object",
+            "begin hand-object manipulation",
+            "finish hand-object manipulation",
+            "hold object",
+            "pause or hold object",
+            "unclear action",
+        }:
+            return True
+        if label == ActionLabel.UNKNOWN:
+            return True
+        if confidence < 0.38 and any(token in description for token in {"object", "manipulates", "unclear"}):
+            return True
+        return False
+
     def _summarize_semantic(self, group: list[FrameAnnotation]) -> SemanticStep:
-        representative = group[len(group) // 2]
+        representative = self._best_summary_frame(group)
         return SemanticStep(
             description=representative.semantic.description,
             task_intent=representative.semantic.task_intent,
@@ -149,12 +280,12 @@ class Segmenter:
             evidence={
                 "frame_count": len(group),
                 "frame_indices": [frame.frame_index for frame in group],
-                "grouping": "consecutive_equal_description_and_label",
+                "grouping": self._grouping_reason(group),
             },
         )
 
     def _summarize_symbolic_action(self, group: list[FrameAnnotation]) -> SymbolicActionLabel:
-        representative = group[len(group) // 2]
+        representative = self._best_summary_frame(group)
         return SymbolicActionLabel(
             label=representative.symbolic_action.label,
             confidence=round(mean(frame.symbolic_action.confidence for frame in group), 2),
