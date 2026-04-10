@@ -60,14 +60,22 @@ blobPathComponents[-1] = "egos"
 
 
 import torch
-from diffusers import DiffusionPipeline
 from diffusers.utils import load_image
+
+try:
+    from diffusers import QwenImageEditPlusPipeline
+except (ImportError, AttributeError) as e:
+    raise RuntimeError(
+        "The qwen-multiple-angles-2509 base checkpoint requires diffusers >= 0.36.0 "
+        "(QwenImageEditPlusPipeline). Upgrade on this machine with: "
+        "pip install -U 'diffusers>=0.36.0'"
+    ) from e
 
 base_model_path = "/home/ubuntu/models/qwen-multiple-angles-2509/qwen-base"
 lora_path = "/home/ubuntu/models/qwen-multiple-angles-2509/qwen-image-edit-lora"
 
 
-pipe = DiffusionPipeline.from_pretrained(
+pipe = QwenImageEditPlusPipeline.from_pretrained(
     base_model_path,
     torch_dtype=torch.bfloat16,
     device_map="cuda")
