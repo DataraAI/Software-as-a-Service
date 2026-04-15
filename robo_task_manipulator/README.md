@@ -4,6 +4,22 @@ RoboTaskManipulator is a practical v1 backend for turning photos, videos, or ord
 
 v1 is built around pretrained inference. It does not require training a new model.
 
+## Work In Progress
+
+This project is still actively being built.
+
+What is already working:
+- local or VM-based batch and single-inference pipeline runs
+- Colab-friendly image and video testing
+- Lambda.ai VM-hosted FastAPI service for synchronous single-image annotation
+- Azure Blob source download and canonical annotation JSON upload for the new service path
+
+What is still in progress:
+- DaaS product integration end to end
+- production hardening for the Lambda.ai service
+- async image/video job flow for longer-running requests
+- broader Azure operational setup and deployment automation
+
 ## What It Does
 
 Input:
@@ -58,7 +74,10 @@ Action backend:
 - `configs/`: example runtime configuration
 - `data/`: sample inputs, benchmark examples, and generated outputs
 - `docs/`: architecture notes and project-specific guidance
-- `scripts/`: runnable entry points for single inference, batch annotation, and evaluation
+- `scripts/`: runnable entry points for single inference, batch annotation, evaluation, and the Lambda.ai service
+- `src/robotask_manipulator/api/`: FastAPI routes and HTTP schemas for the DaaS-facing service
+- `src/robotask_manipulator/service/`: orchestration layer for source fetch -> inference -> persistence
+- `src/robotask_manipulator/storage/`: Azure Blob source and annotation storage adapters
 - `src/robotask_manipulator/ingestion/`: media detection and frame extraction
 - `src/robotask_manipulator/segmentation/`: grouped step summaries derived from frame predictions
 - `src/robotask_manipulator/task_understanding/`: frame-level semantic VLM backend plus symbolic labeling
@@ -145,6 +164,12 @@ That installs the base stack for:
 Optional `pi0` support is intentionally not required for this workflow.
 If you enable `pi0` later, treat it as a separate optional environment and capability path.
 
+Lambda.ai VM service config:
+
+```bash
+copy configs\lambda_vm_service.yaml configs\lambda_vm_service.local.yaml
+```
+
 Download a semantic model locally for Lambda or any offline VM:
 
 ```bash
@@ -161,6 +186,23 @@ py -3 scripts\run_single_inference.py ^
   --semantic-model-path C:\models\Qwen2.5-VL-7B-Instruct ^
   --semantic-offline
 ```
+
+Lambda.ai + DaaS service, Milestone 1:
+
+```bash
+set RTM_SERVICE_AUTH_TOKEN=change-me
+set RTM_AZURE_STORAGE_ACCOUNT_URL=https://your-account.blob.core.windows.net
+py -3 scripts\run_annotation_service.py --config configs\lambda_vm_service.yaml
+```
+
+Current Milestone 1 service scope:
+- designed for a persistent Lambda.ai VM, not AWS Lambda
+- supports `POST /v1/annotations/image`
+- downloads the selected image from Azure Blob
+- runs the existing RoboTaskManipulator pipeline using the local semantic model path
+- returns canonical annotation JSON directly to DaaS
+- stores the same JSON back to Azure Blob under `annotations/{source_asset_id}/{annotation_id}.json`
+- reserves async job routes for Milestone 2, but does not implement them yet
 
 Colab-friendly real image/video demo:
 
@@ -229,6 +271,16 @@ Useful env vars:
 - `RTM_SEMANTIC_DEVICE`
 - `RTM_SEMANTIC_OFFLINE`
 - `RTM_FRAME_CONTEXT_RADIUS`
+- `RTM_SERVICE_HOST`
+- `RTM_SERVICE_PORT`
+- `RTM_SERVICE_WARM_LOAD`
+- `RTM_SERVICE_AUTH_TOKEN`
+- `RTM_SERVICE_TEMP_DIR`
+- `RTM_AZURE_STORAGE_ACCOUNT_URL`
+- `RTM_AZURE_STORAGE_CONNECTION_STRING`
+- `RTM_AZURE_SOURCE_CONTAINER_ALLOWLIST`
+- `RTM_AZURE_ANNOTATION_CONTAINER`
+- `RTM_AZURE_ANNOTATION_PREFIX`
 - `RTM_ACTION_BACKEND`
 - `PI0_MODEL_ID`
 - `PI0_CHECKPOINT_PATH`
@@ -238,6 +290,7 @@ Useful env vars:
 
 For Colab or Lambda-style video testing, see `configs/colab_refined_video.yaml` for a practical starting point that keeps Qwen on GPU while downsampling longer videos and producing cleaner grouped segments.
 The repo also includes `scripts/run_colab_video_demo.py` plus `colab_refined_video_test.ipynb` as a thin Colab wrapper around that demo script.
+For the new DaaS service path, see `configs/lambda_vm_service.yaml`, `scripts/run_annotation_service.py`, and `docs/daas_lambda_vm_integration.md`.
 
 ## Isaac Sim Export
 
@@ -279,6 +332,9 @@ Reports are written as:
 
 ## Known Limitations
 
+- The Lambda.ai + DaaS service path is still work in progress and should be treated as an active integration milestone rather than a finished production deployment.
+- Milestone 1 only supports synchronous single-image annotation through the service path.
+- Async image/video job handling is planned but not implemented yet.
 - Semantic understanding is frame-first and VLM-driven, but it is still conservative and not guaranteed to hit benchmark-quality step descriptions on every real video.
 - `Qwen/Qwen2.5-VL-7B-Instruct` is significantly heavier than the earlier small demo model and is best run on a capable local GPU VM.
 - `pi0` proposals are optional and embodiment-sensitive.
