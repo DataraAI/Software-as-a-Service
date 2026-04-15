@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pathlib import Path
 
 from robotask_manipulator.schemas import DatasetManifest, DatasetManifestRecord, EpisodeOutput
@@ -11,11 +13,11 @@ from robotask_manipulator.utils.io import write_json_file
 class JsonArtifactExporter:
     """Write product outputs in a debug-friendly, evaluation-friendly shape."""
 
-    def write_episode(self, output: EpisodeOutput, path: str | Path) -> Path:
-        return write_json_file(path, output.model_dump(mode="json"))
+    def serialize_episode(self, output: EpisodeOutput) -> dict[str, Any]:
+        return output.model_dump(mode="json")
 
-    def write_raw_debug(self, output: EpisodeOutput, path: str | Path) -> Path:
-        debug_payload = {
+    def serialize_raw_debug(self, output: EpisodeOutput) -> dict[str, Any]:
+        return {
             "episode_id": output.episode_id,
             "frame_predictions": [
                 {
@@ -34,7 +36,12 @@ class JsonArtifactExporter:
                 for segment in output.segments
             ],
         }
-        return write_json_file(path, debug_payload)
+
+    def write_episode(self, output: EpisodeOutput, path: str | Path) -> Path:
+        return write_json_file(path, self.serialize_episode(output))
+
+    def write_raw_debug(self, output: EpisodeOutput, path: str | Path) -> Path:
+        return write_json_file(path, self.serialize_raw_debug(output))
 
     def write_manifest(self, manifest: DatasetManifest, path: str | Path) -> Path:
         return write_json_file(path, manifest.model_dump(mode="json"))

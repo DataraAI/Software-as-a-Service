@@ -18,6 +18,14 @@ def _parse_bool(value: str | bool | None, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _parse_csv(value: str | list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    return tuple(item.strip() for item in str(value).split(",") if item.strip())
+
+
 @dataclass(frozen=True)
 class IngestionSettings:
     """Settings for photo/video ingestion and frame extraction."""
@@ -86,6 +94,29 @@ class ExportSettings:
 
 
 @dataclass(frozen=True)
+class ServiceSettings:
+    """Settings for the Lambda.ai VM-hosted annotation service."""
+
+    host: str = "0.0.0.0"
+    port: int = 8000
+    warm_load: bool = False
+    auth_token: str | None = None
+    temp_dir: str = ".rtm_service_tmp"
+
+
+@dataclass(frozen=True)
+class AzureBlobSettings:
+    """Settings for Azure Blob source media and annotation storage."""
+
+    account_url: str | None = None
+    connection_string: str | None = None
+    source_container_allowlist: tuple[str, ...] = ()
+    annotation_container: str = "annotations"
+    annotation_prefix: str = "annotations"
+    create_containers: bool = False
+
+
+@dataclass(frozen=True)
 class AppSettings:
     """Top-level product configuration."""
 
@@ -94,6 +125,8 @@ class AppSettings:
     semantic: SemanticSettings = SemanticSettings()
     action_backend: ActionBackendSettings = ActionBackendSettings()
     export: ExportSettings = ExportSettings()
+    service: ServiceSettings = ServiceSettings()
+    azure: AzureBlobSettings = AzureBlobSettings()
 
     def with_overrides(self, **overrides: Any) -> "AppSettings":
         cleaned = {key: value for key, value in overrides.items() if value is not None}
@@ -119,6 +152,8 @@ def load_settings(config_path: str | Path | None = None) -> AppSettings:
     semantic_cfg = {**payload.get("semantic", {})}
     action_cfg = {**payload.get("action_backend", payload.get("pi0", {}))}
     export_cfg = {**payload.get("export", {})}
+    service_cfg = {**payload.get("service", {})}
+    azure_cfg = {**payload.get("azure", {})}
 
     semantic_model_id = os.getenv("RTM_SEMANTIC_MODEL_ID", semantic_cfg.get("model_id", SemanticSettings.model_id))
     semantic_model_path = os.getenv("RTM_SEMANTIC_MODEL_PATH", semantic_cfg.get("local_model_path"))
@@ -200,5 +235,37 @@ def load_settings(config_path: str | Path | None = None) -> AppSettings:
             manifest_name=export_cfg.get("manifest_name", ExportSettings.manifest_name),
             evaluation_json_name=export_cfg.get("evaluation_json_name", ExportSettings.evaluation_json_name),
             evaluation_csv_name=export_cfg.get("evaluation_csv_name", ExportSettings.evaluation_csv_name),
+        ),
+        service=ServiceSettings(
+            host=os.getenv("RTM_SERVICE_HOST", service_cfg.get("host", ServiceSettings.host)),
+            port=int(os.getenv("RTM_SERVICE_PORT", service_cfg.get("port", ServiceSettings.port))),
+            warm_load=_parse_bool(
+                os.getenv("RTM_SERVICE_WARM_LOAD", service_cfg.get("warm_load")),
+                default=ServiceSettings.warm_load,
+            ),
+            auth_token=os.getenv("RTM_SERVICE_AUTH_TOKEN", service_cfg.get("auth_token")),
+            temp_dir=os.getenv("RTM_SERVICE_TEMP_DIR", service_cfg.get("temp_dir", ServiceSettings.temp_dir)),
+        ),
+        azure=AzureBlobSettings(
+            account_url=os.getenv("RTM_AZURE_STORAGE_ACCOUNT_URL", azure_cfg.get("account_url")),
+            connection_string=os.getenv(
+                "RTM_AZURE_STORAGE_CONNECTION_STRING",
+                azure_cfg.get("connection_string"),
+            ),
+            source_container_allowlist=_parse_csv(
+                os.getenv("RTM_AZURE_SOURCE_CONTAINER_ALLOWLIST", azure_cfg.get("source_container_allowlist"))
+            ),
+            annotation_container=os.getenv(
+                "RTM_AZURE_ANNOTATION_CONTAINER",
+                azure_cfg.get("annotation_container", AzureBlobSettings.annotation_container),
+            ),
+            annotation_prefix=os.getenv(
+                "RTM_AZURE_ANNOTATION_PREFIX",
+                azure_cfg.get("annotation_prefix", AzureBlobSettings.annotation_prefix),
+            ),
+            create_containers=_parse_bool(
+                os.getenv("RTM_AZURE_CREATE_CONTAINERS", azure_cfg.get("create_containers")),
+                default=AzureBlobSettings.create_containers,
+            ),
         ),
     )
