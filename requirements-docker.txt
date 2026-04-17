@@ -1,0 +1,2 @@
+# Minimal dependencies for datara_client.py and light tooling inside the saas image.
+requests>=2.31.0

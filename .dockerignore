@@ -1,0 +1,11 @@
+.git
+.venv
+venv
+env
+packages
+**/__pycache__
+*.pyc
+*.pyo
+.DS_Store
+.ipynb_checkpoints
+vla_inference/outputs
