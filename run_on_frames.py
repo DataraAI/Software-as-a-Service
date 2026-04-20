@@ -16,9 +16,8 @@ import os
 import sys
 from pathlib import Path
 
-# Use local packages: packages/ for lerobot & lingbot_vla, packages/lingbot_vla/ for lingbotvla.
-_repo_root = Path(__file__).resolve().parent
-_packages = _repo_root / "packages"
+# Local vendored deps: ~/packages (lerobot, lingbot_vla), ~/packages/lingbot_vla for lingbotvla.
+_packages = Path.home() / "packages"
 _lerobot_root = _packages / "lerobot"
 _lingbot_vla_root = _packages / "lingbot_vla"
 if _packages.is_dir() and str(_packages) not in sys.path:

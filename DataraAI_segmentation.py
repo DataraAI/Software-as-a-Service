@@ -1,8 +1,13 @@
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
+
+_packages = Path.home() / "packages"
+if _packages.is_dir() and str(_packages) not in sys.path:
+    sys.path.insert(0, str(_packages))
 
 from packages.sam3.sam3.model_builder import build_sam3_video_predictor
 
