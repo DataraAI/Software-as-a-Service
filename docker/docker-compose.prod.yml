@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  saas:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile-saas
+      target: production
+    container_name: datara-saas
+    environment:
+      DATARA_API_BASE_URL: http://backend:5151
+    working_dir: /app
+    networks:
+      - datara-network
+    restart: unless-stopped
+
+networks:
+  datara-network:
+    external: true
