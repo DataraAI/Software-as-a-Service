@@ -6,7 +6,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PIL import Image
 
 _packages = Path.home() / "packages"
 if _packages.is_dir() and str(_packages) not in sys.path:
@@ -144,6 +143,11 @@ def object_folder_name(object_id: str) -> str:
     return f"object_{object_id}"
 
 
+def save_mask_image(output_path: Path, mask_frame: np.ndarray) -> None:
+    if not cv2.imwrite(str(output_path), mask_frame):
+        raise RuntimeError(f"Could not write mask image to {output_path}")
+
+
 def write_instance_masks(
     outputs_per_frame: dict[int, dict],
     output_dir: Path,
@@ -187,7 +191,7 @@ def write_instance_masks(
 
         for object_id, object_dir in object_dirs.items():
             mask_frame = frame_masks_by_object.get(object_id, blank_mask)
-            Image.fromarray(mask_frame, mode="L").save(object_dir / output_name)
+            save_mask_image(object_dir / output_name, mask_frame)
 
 
 def parse_args() -> argparse.Namespace:
