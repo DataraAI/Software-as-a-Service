@@ -140,7 +140,7 @@ def fallback_frame_name(frame_index: int) -> str:
 
 
 def object_folder_name(object_id: str) -> str:
-    return f"object_{object_id}"
+    return str(object_id)
 
 
 def save_mask_image(output_path: Path, mask_frame: np.ndarray) -> None:
