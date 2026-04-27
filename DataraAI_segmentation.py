@@ -187,6 +187,7 @@ def write_instance_masks(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--input_mode", choices=["folder"], default="folder")
     parser.add_argument("--image_dir", type=Path, required=True)
     parser.add_argument("--segment", type=str, required=True)
     parser.add_argument("--output_dir", type=Path, required=True)
@@ -195,6 +196,8 @@ def parse_args() -> argparse.Namespace:
 
 def main():
     args = parse_args()
+    if args.input_mode != "folder":
+        raise ValueError("Only folder input_mode is supported in this mask-generation flow")
     image_dir = args.image_dir.expanduser().resolve()
     output_dir = args.output_dir.expanduser().resolve()
     image_paths = collect_images(image_dir)
