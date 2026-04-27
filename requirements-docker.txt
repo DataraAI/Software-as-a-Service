@@ -1,2 +1,5 @@
-# Minimal dependencies for datara_client.py and light tooling inside the saas image.
+# Slim / development image: API server only (GPU Python deps come from requirements-gpu-worker.txt in production).
 requests>=2.31.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0

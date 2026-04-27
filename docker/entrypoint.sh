@@ -1,39 +1,25 @@
 #!/bin/bash
 set -e
 
-export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}/app"
+export PYTHONPATH="/app${PYTHONPATH:+:$PYTHONPATH}"
 
-wait_for_api() {
-    local max_attempts="${1:-30}"
-    local attempt=1
-
-    echo "Waiting for Datara API (${DATARA_API_BASE_URL}/health)..."
-
-    while [ "$attempt" -le "$max_attempts" ]; do
-        if python -c "
-import os
-import urllib.error
-import urllib.request
-
-base = os.environ.get('DATARA_API_BASE_URL', '').rstrip('/')
-if not base:
-    raise SystemExit(1)
-urllib.request.urlopen(base + '/health', timeout=3)
-" 2>/dev/null; then
-            echo "✓ Datara API is ready"
-            return 0
-        fi
-        echo "  Attempt $attempt/$max_attempts..."
-        sleep 2
-        attempt=$((attempt + 1))
-    done
-
-    echo "⚠ Warning: API did not become available in time"
-    return 1
-}
-
-if [ "${DATARA_WAIT_FOR_API:-0}" = "1" ] && [ -n "${DATARA_API_BASE_URL:-}" ]; then
-    wait_for_api || true
+# Optional: wait for an external HTTP dependency (not used for GPU-only deployments).
+if [ "${GPU_WAIT_FOR_HTTP:-0}" = "1" ] && [ -n "${GPU_WAIT_URL:-}" ]; then
+  echo "Waiting for ${GPU_WAIT_URL}..."
+  python - <<'PY' || true
+import os, time, urllib.request
+url = os.environ.get("GPU_WAIT_URL", "").rstrip("/")
+if not url:
+    raise SystemExit(0)
+for i in range(60):
+    try:
+        urllib.request.urlopen(url, timeout=3)
+        print("ready")
+        raise SystemExit(0)
+    except Exception:
+        time.sleep(2)
+print("timeout waiting for URL")
+PY
 fi
 
 exec "$@"

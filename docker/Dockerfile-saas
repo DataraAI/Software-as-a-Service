@@ -2,29 +2,53 @@ FROM python:3.12-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
 
 WORKDIR /app
 
-# Development — live-mounted workspace, interactive use
+# Development — API + live-mounted repo (GPU packages expected on host or in image)
 FROM base AS development
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements-docker.txt .
 RUN pip install --no-cache-dir -r requirements-docker.txt
 
 COPY . .
 
-CMD ["sleep", "infinity"]
+EXPOSE 8765
 
-# Production — slim runtime for batch/cron or long-running workers
+CMD ["uvicorn", "gpu_api.main:app", "--host", "0.0.0.0", "--port", "8765"]
+
+# Production — CUDA PyTorch + worker deps + GPU API (build on Linux/amd64 with NVIDIA runtime)
 FROM base AS production
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+COPY requirements-gpu-worker.txt .
+RUN pip install --no-cache-dir -r requirements-gpu-worker.txt
+
 COPY requirements-docker.txt .
 RUN pip install --no-cache-dir -r requirements-docker.txt
 
 COPY . .
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD python -c "from datara_client import DataraAPIClient; DataraAPIClient().health()" || exit 1
+ENV DATARA_EGO_IMAGES_ROOT=/tmp/datara_ego_outputs
 
-CMD ["python", "-c", "from datara_client import DataraAPIClient; c=DataraAPIClient(); print(c.health())"]
+EXPOSE 8765
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=5)"
+
+CMD ["uvicorn", "gpu_api.main:app", "--host", "0.0.0.0", "--port", "8765"]

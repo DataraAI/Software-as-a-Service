@@ -1,0 +1,19 @@
+# Installed in the production GPU image after torch/torchvision (CUDA wheels in Dockerfile).
+# Pin versions on the Lambda host if builds become unstable.
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0
+requests>=2.31.0
+Pillow>=10.0.0
+numpy>=1.26.0
+diffusers>=0.36.0
+transformers>=4.46.0
+accelerate>=1.0.0
+safetensors>=0.4.0
+huggingface-hub>=0.25.0
+protobuf>=4.0.0
+sentencepiece>=0.2.0
+nltk>=3.9.0
+qwen-vl-utils>=0.0.8
+opencv-python-headless>=4.10.0

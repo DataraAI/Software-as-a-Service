@@ -30,6 +30,12 @@ Example usage:
 parser = argparse.ArgumentParser()
 parser.add_argument("--prompt", type=str, help="input prompt", default="Describe the image.")
 parser.add_argument("--egoURL", type=str, help="input URL of ego image")
+parser.add_argument(
+    "--output_json",
+    type=str,
+    default=None,
+    help="Path to write VLM JSON (default: ~/vlm_tags.json)",
+)
 # parser.add_argument("--container_name", type=str, help="Azure Blob's container name")
 
 args = parser.parse_args()
@@ -128,6 +134,7 @@ for k in keywords:
         vlm_tags.append(k)
 
 schema_output = {"VLM_tags": vlm_tags}
-with open(os.path.expanduser("~") + "/vlm_tags.json", "w") as f:
+out_json_path = args.output_json or (os.path.expanduser("~") + "/vlm_tags.json")
+with open(out_json_path, "w") as f:
     json.dump(schema_output, f, indent=2)
-print(os.path.expanduser("~") + "/vlm_tags.json")
+print(out_json_path)

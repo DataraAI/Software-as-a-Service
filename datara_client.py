@@ -1,9 +1,10 @@
 """
-HTTP client for the Data-as-a-Service Flask API.
+Optional HTTP client for the Data-as-a-Service Flask API (legacy / tooling).
 
 Base URL is read from DATARA_API_BASE_URL (default http://127.0.0.1:5000).
-In Docker on the shared ``datara-network``, use http://backend:5000 (dev) or
-http://backend:5151 (production gunicorn).
+
+The GPU worker image runs ``gpu_api`` instead; DaaS calls that service via
+``SAAS_GPU_BASE_URL`` (see ``saas_gpu_client`` in Data-as-a-Service).
 """
 
 from __future__ import annotations

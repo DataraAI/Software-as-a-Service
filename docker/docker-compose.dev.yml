@@ -1,24 +1,22 @@
-version: '3.8'
+version: "3.8"
+
+# GPU worker API for Data-as-a-Service. Run on the Lambda host with NVIDIA Container Toolkit.
+# From this directory: docker compose -f docker/docker-compose.dev.yml up --build
 
 services:
-  saas:
+  saas-gpu:
     build:
       context: ..
       dockerfile: docker/Dockerfile-saas
       target: development
-    container_name: datara-saas
+    container_name: datara-saas-gpu
+    ports:
+      - "8765:8765"
     environment:
-      DATARA_API_BASE_URL: http://backend:5000
-    working_dir: /app
+      GPU_API_KEY: ${GPU_API_KEY:-}
+      GPU_JOB_TIMEOUT_S: ${GPU_JOB_TIMEOUT_S:-7200}
+      DATARA_EGO_IMAGES_ROOT: ${DATARA_EGO_IMAGES_ROOT:-/tmp/datara_ego_outputs}
     volumes:
       - ..:/app
-    stdin_open: true
-    tty: true
-    networks:
-      - datara-network
+    working_dir: /app
     restart: unless-stopped
-    command: ["sleep", "infinity"]
-
-networks:
-  datara-network:
-    external: true

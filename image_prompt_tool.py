@@ -113,11 +113,9 @@ prompt_joined = "_".join(promptSplit)           # Rotate_right_45_degrees
 # frontGrille_000_ego_Rotate_right_45_degrees.png
 new_filename = f"{name_no_ext}_{prompt_joined}.png"
 
-# "/".join(blobPathComponents)
-# ==
-# /home/ubuntu/ego_images/roboteyeview/automotive/bmw/frontGrille/egos
-imageFilepath = "/home/ubuntu/ego_images"
-imageFilepath = os.path.join(imageFilepath, *blobPathComponents)
+# "/".join(blobPathComponents) under DATARA_EGO_IMAGES_ROOT (default /home/ubuntu/ego_images)
+ego_root = os.environ.get("DATARA_EGO_IMAGES_ROOT", "/home/ubuntu/ego_images")
+imageFilepath = os.path.join(ego_root, *blobPathComponents)
 os.makedirs(imageFilepath, exist_ok=True)
 
 imageFilepath = os.path.join(imageFilepath, new_filename)
