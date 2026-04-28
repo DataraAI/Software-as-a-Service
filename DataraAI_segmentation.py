@@ -138,6 +138,11 @@ def object_folder_name(object_id: str) -> str:
     return str(object_id)
 
 
+def build_frame_names(frame_count: int) -> list[str]:
+    n_digits = max(1, len(str(max(0, frame_count - 1))))
+    return [f"frame_{index:0{n_digits}d}.png" for index in range(frame_count)]
+
+
 def save_mask_image(output_path: Path, mask_frame: np.ndarray) -> None:
     if not cv2.imwrite(str(output_path), mask_frame):
         raise RuntimeError(f"Could not write mask image to {output_path}")
@@ -208,7 +213,7 @@ def main():
     if not image_paths:
         raise ValueError(f"No supported image files found in {image_dir}")
 
-    frame_names = [f"{path.stem}.png" for path in image_paths]
+    frame_names = build_frame_names(len(image_paths))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="sam3_masks_") as temp_dir:
