@@ -1,15 +1,10 @@
 import argparse
 import re
-import sys
 import tempfile
 from pathlib import Path
 
 import cv2
 import numpy as np
-
-_packages = Path.home() / "packages"
-if _packages.is_dir() and str(_packages) not in sys.path:
-    sys.path.insert(0, str(_packages))
 
 from packages.sam3.sam3.model_builder import build_sam3_video_predictor
 
