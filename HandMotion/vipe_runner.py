@@ -8,13 +8,12 @@ from __future__ import annotations
 
 import argparse
 import os
-import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from runner_common import default_vipe_work_dir, run_command, write_manifest
+from runner_common import default_vipe_work_dir, resolve_vipe_command, run_command, write_manifest
 
 
 def run_vipe(
@@ -36,7 +35,7 @@ def run_vipe(
 
     env = os.environ.copy()
     env.setdefault("MPLBACKEND", "Agg")
-    vipe_cmd = shlex.split(os.environ.get("VIPE_CMD", "micromamba run -n vipe vipe"))
+    vipe_cmd = resolve_vipe_command()
     run_command(
         vipe_cmd + ["infer", str(video_path), "--output", str(output_dir), "--pipeline", pipeline],
         cwd=resolved_work_dir,
@@ -50,6 +49,7 @@ def run_vipe(
         "output_dir": str(output_dir),
         "pipeline": pipeline,
         "work_dir": str(resolved_work_dir),
+        "command": vipe_cmd,
         "logs": {"vipe": str(logs_dir / "vipe.log")},
     }
     write_manifest(output_dir, "vipe_manifest.json", manifest)
