@@ -52,8 +52,16 @@ def run_dynhamr_for_vipe(
 
     env = os.environ.copy()
     env.setdefault("MPLBACKEND", "Agg")
+    env.setdefault("PYTHONNOUSERSITE", "1")
 
     dynhamr_python_cmd = resolve_dynhamr_python_command()
+    dynhamr_python_path = Path(dynhamr_python_cmd[0]).expanduser().resolve()
+    dynhamr_bin_dir = dynhamr_python_path.parent
+    existing_path = env.get("PATH", "")
+    env["PATH"] = (
+        f"{dynhamr_bin_dir}:{existing_path}" if existing_path else str(dynhamr_bin_dir)
+    )
+    env.setdefault("CONDA_PREFIX", str(dynhamr_bin_dir.parent))
     dynhamr_args = [
         "run_opt.py",
         "data=video_vipe",
