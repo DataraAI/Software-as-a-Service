@@ -17,6 +17,15 @@ from pathlib import Path
 from typing import Any
 
 VALID_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"}
+CONDA_ENV_ROOT_CANDIDATES = (
+    Path("~/miniconda3/envs").expanduser(),
+    Path("~/mambaforge/envs").expanduser(),
+    Path("~/anaconda3/envs").expanduser(),
+    Path("~/.conda/envs").expanduser(),
+    Path("~/micromamba/envs").expanduser(),
+    Path("~/.local/share/mamba/envs").expanduser(),
+    Path("~/.local/share/micromamba/envs").expanduser(),
+)
 
 
 def parse_bool(value: str | bool) -> bool:
@@ -109,6 +118,18 @@ def default_dynhamr_root() -> Path:
     return Path("~/packages/Dyn-Hamr").expanduser().resolve()
 
 
+def default_vipe_root() -> Path:
+    candidates = [
+        Path(os.environ.get("VIPE_ROOT", "")).expanduser() if os.environ.get("VIPE_ROOT") else None,
+        Path("~/packages/ViPE").expanduser(),
+        Path("~/packages/vipe").expanduser(),
+    ]
+    for candidate in candidates:
+        if candidate and candidate.exists():
+            return candidate.resolve()
+    return Path("~/packages/ViPE").expanduser().resolve()
+
+
 def locate_dynhamr_work_dir(dynhamr_root: Path) -> Path:
     nested = dynhamr_root / "dyn-hamr"
     if (nested / "run_opt.py").is_file():
@@ -124,7 +145,118 @@ def default_vipe_work_dir() -> Path:
         candidate = Path(configured).expanduser()
         if candidate.exists():
             return candidate.resolve()
+    vipe_root = default_vipe_root()
+    if vipe_root.exists():
+        return vipe_root
     return Path.cwd().resolve()
+
+
+def _resolve_existing_path(value: str | os.PathLike[str] | None) -> Path | None:
+    if not value:
+        return None
+    candidate = Path(value).expanduser()
+    if candidate.exists():
+        return candidate.resolve()
+    return None
+
+
+def _command_executable_exists(command: list[str]) -> bool:
+    if not command:
+        return False
+    executable = str(command[0]).strip()
+    if not executable:
+        return False
+
+    resolved_path = _resolve_existing_path(executable)
+    if resolved_path is not None:
+        return True
+
+    return shutil.which(executable) is not None
+
+
+def _common_env_python_candidates(*env_names: str) -> list[Path]:
+    candidates: list[Path] = []
+    for env_name in env_names:
+        clean_name = str(env_name or "").strip()
+        if not clean_name:
+            continue
+        for root in CONDA_ENV_ROOT_CANDIDATES:
+            candidates.append(root / clean_name / "bin" / "python")
+            candidates.append(root / clean_name / "bin" / "python3")
+    return candidates
+
+
+def resolve_python_bin(
+    *,
+    env_var_name: str,
+    env_names: tuple[str, ...],
+    label: str,
+) -> Path:
+    configured = os.environ.get(env_var_name)
+    configured_path = _resolve_existing_path(configured)
+    if configured and configured_path is None:
+        raise FileNotFoundError(f"{label} python override {env_var_name} was set but not found: {configured}")
+    if configured_path is not None:
+        return configured_path
+
+    for candidate in _common_env_python_candidates(*env_names):
+        if candidate.exists():
+            return candidate.resolve()
+
+    raise FileNotFoundError(
+        f"Could not locate {label} python. Set {env_var_name} or install {label} in a standard env location."
+    )
+
+
+def resolve_vipe_command() -> list[str]:
+    override = os.environ.get("VIPE_CMD")
+    if override:
+        override_command = shlex.split(override)
+        if _command_executable_exists(override_command):
+            return override_command
+
+    configured_bin = os.environ.get("VIPE_BIN")
+    configured_bin_path = _resolve_existing_path(configured_bin)
+    if configured_bin and configured_bin_path is None:
+        raise FileNotFoundError(f"VIPE_BIN was set but not found: {configured_bin}")
+    if configured_bin_path is not None:
+        return [str(configured_bin_path)]
+
+    for root in CONDA_ENV_ROOT_CANDIDATES:
+        candidate = root / "vipe" / "bin" / "vipe"
+        if candidate.exists():
+            return [str(candidate.resolve())]
+
+    which_vipe = shutil.which("vipe")
+    if which_vipe:
+        return [which_vipe]
+
+    return [
+        str(
+            resolve_python_bin(
+                env_var_name="VIPE_PYTHON_BIN",
+                env_names=("vipe",),
+                label="ViPE",
+            )
+        ),
+        "-m",
+        "vipe",
+    ]
+
+
+def resolve_dynhamr_python_command() -> list[str]:
+    override = os.environ.get("DYNHAMR_PYTHON_CMD")
+    if override:
+        override_command = shlex.split(override)
+        if _command_executable_exists(override_command):
+            return override_command
+
+    python_bin = resolve_python_bin(
+        env_var_name="DYNHAMR_PYTHON_BIN",
+        env_names=("dynhamr", "dyn-hamr"),
+        label="Dyn-HaMR",
+    )
+    return [str(python_bin)]
 
 
 def run_command(command: list[str], *, cwd: Path, log_path: Path, env: dict[str, str]) -> None:
@@ -133,15 +265,22 @@ def run_command(command: list[str], *, cwd: Path, log_path: Path, env: dict[str,
     with log_path.open("a", encoding="utf-8") as log_handle:
         log_handle.write(f"\n[{started}] $ {' '.join(shlex.quote(part) for part in command)}\n")
         log_handle.flush()
-        completed = subprocess.run(
-            command,
-            cwd=str(cwd),
-            env=env,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(cwd),
+                env=env,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            log_handle.write(f"\n[spawn error] {exc}\n")
+            raise RuntimeError(
+                f"Command executable was not found: {command[0]}. "
+                "Verify the ViPE/Dyn-HaMR runtime paths on the SaaS VM."
+            ) from exc
         log_handle.write(f"\n[exit {completed.returncode}]\n")
 
     if completed.returncode != 0:
