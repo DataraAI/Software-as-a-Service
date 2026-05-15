@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import shlex
 import sys
 import time
 from datetime import datetime, timezone
@@ -22,6 +21,7 @@ from runner_common import (
     default_dynhamr_root,
     locate_dynhamr_work_dir,
     parse_bool,
+    resolve_dynhamr_python_command,
     run_command,
     write_manifest,
 )
@@ -53,9 +53,7 @@ def run_dynhamr_for_vipe(
     env = os.environ.copy()
     env.setdefault("MPLBACKEND", "Agg")
 
-    dynhamr_python_cmd = shlex.split(
-        os.environ.get("DYNHAMR_PYTHON_CMD", "micromamba run -n dynhamr python")
-    )
+    dynhamr_python_cmd = resolve_dynhamr_python_command()
     dynhamr_args = [
         "run_opt.py",
         "data=video_vipe",
@@ -102,6 +100,7 @@ def run_dynhamr_for_vipe(
         "seq": seq,
         "fps": fps,
         "is_static": is_static,
+        "command": dynhamr_python_cmd + ["run_opt.py"],
         "mesh_count": len(copied_meshes),
         "meshes": copied_meshes,
         "logs": {"dynhamr": str(logs_dir / "dynhamr.log")},
