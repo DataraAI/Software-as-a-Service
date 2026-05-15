@@ -151,10 +151,24 @@ def default_vipe_work_dir() -> Path:
     return Path.cwd().resolve()
 
 
+def _is_explicit_path(value: str) -> bool:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return False
+    return (
+        normalized.startswith(("~", ".", "/", "\\"))
+        or "/" in normalized
+        or "\\" in normalized
+    )
+
+
 def _resolve_existing_path(value: str | os.PathLike[str] | None) -> Path | None:
     if not value:
         return None
-    candidate = Path(value).expanduser()
+    string_value = str(value)
+    if not _is_explicit_path(string_value):
+        return None
+    candidate = Path(string_value).expanduser()
     if candidate.exists():
         return candidate.resolve()
     return None
