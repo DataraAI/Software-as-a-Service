@@ -306,21 +306,32 @@ def run_command(command: list[str], *, cwd: Path, log_path: Path, env: dict[str,
         raise RuntimeError(f"Command failed with exit {completed.returncode}: {' '.join(command)}\n{tail}")
 
 
-def collect_new_obj_files(search_root: Path, seq: str, started_at: float) -> list[Path]:
+def collect_new_files(search_root: Path, seq: str, started_at: float, suffixes: tuple[str, ...]) -> list[Path]:
     if not search_root.exists():
         return []
-    obj_files = sorted(path for path in search_root.rglob("*.obj") if path.is_file())
-    if not obj_files:
+    suffix_set = {suffix.lower() for suffix in suffixes}
+    matching_files = sorted(
+        path for path in search_root.rglob("*") if path.is_file() and path.suffix.lower() in suffix_set
+    )
+    if not matching_files:
         return []
 
-    recent = [path for path in obj_files if path.stat().st_mtime >= started_at - 60]
+    recent = [path for path in matching_files if path.stat().st_mtime >= started_at - 60]
     seq_lower = seq.lower()
     seq_matches = [path for path in recent if seq_lower in path.as_posix().lower()]
     if seq_matches:
         return sorted(seq_matches)
     if recent:
         return sorted(recent)
-    return sorted(obj_files, key=lambda path: path.stat().st_mtime, reverse=True)
+    return sorted(matching_files, key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def collect_new_obj_files(search_root: Path, seq: str, started_at: float) -> list[Path]:
+    return collect_new_files(search_root, seq, started_at, (".obj",))
+
+
+def collect_new_video_files(search_root: Path, seq: str, started_at: float) -> list[Path]:
+    return collect_new_files(search_root, seq, started_at, (".mp4", ".mov", ".m4v", ".webm"))
 
 
 def safe_output_name(path: Path, root: Path, index: int, used: set[str]) -> str:
@@ -329,38 +340,47 @@ def safe_output_name(path: Path, root: Path, index: int, used: set[str]) -> str:
     except ValueError:
         relative = Path(path.name)
 
+    suffix = relative.suffix or path.suffix or ""
     if len(relative.parts) == 1:
         candidate = relative.name
     else:
         stem = "__".join(re.sub(r"[^a-zA-Z0-9_.-]+", "_", part) for part in relative.with_suffix("").parts)
-        candidate = f"{stem}.obj"
+        candidate = f"{stem}{suffix}"
 
-    candidate = re.sub(r"[^a-zA-Z0-9_.-]+", "_", candidate).strip("._-") or f"mesh_{index:04d}.obj"
-    if not candidate.lower().endswith(".obj"):
-        candidate = f"{candidate}.obj"
+    default_name = f"artifact_{index:04d}{suffix}" if suffix else f"artifact_{index:04d}"
+    candidate = re.sub(r"[^a-zA-Z0-9_.-]+", "_", candidate).strip("._-") or default_name
+    if suffix and not candidate.lower().endswith(suffix.lower()):
+        candidate = f"{candidate}{suffix}"
+    elif not suffix and "." not in Path(candidate).name:
+        candidate = f"{candidate}.bin"
     if candidate in used:
-        candidate = f"{candidate[:-4]}_{index:04d}.obj"
+        stem, extension = os.path.splitext(candidate)
+        candidate = f"{stem}_{index:04d}{extension}"
     used.add(candidate)
     return candidate
 
 
-def copy_meshes(obj_files: list[Path], output_dir: Path, collection_root: Path) -> list[dict[str, str]]:
+def copy_artifacts(source_files: list[Path], output_dir: Path, collection_root: Path) -> list[dict[str, str]]:
     copied: list[dict[str, str]] = []
     used: set[str] = set()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for index, obj_path in enumerate(obj_files):
-        output_name = safe_output_name(obj_path, collection_root, index, used)
+    for index, source_path in enumerate(source_files):
+        output_name = safe_output_name(source_path, collection_root, index, used)
         target = output_dir / output_name
-        shutil.copy2(obj_path, target)
+        shutil.copy2(source_path, target)
         copied.append(
             {
-                "source": str(obj_path),
+                "source": str(source_path),
                 "output": str(target),
                 "name": output_name,
             }
         )
     return copied
+
+
+def copy_meshes(obj_files: list[Path], output_dir: Path, collection_root: Path) -> list[dict[str, str]]:
+    return copy_artifacts(obj_files, output_dir, collection_root)
 
 
 def write_manifest(output_dir: Path, file_name: str, payload: dict[str, Any]) -> Path:

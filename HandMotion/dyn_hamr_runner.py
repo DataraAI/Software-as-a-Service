@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import Any
 
 from runner_common import (
+    collect_new_video_files,
     collect_new_obj_files,
+    copy_artifacts,
     copy_meshes,
     default_dynhamr_root,
     locate_dynhamr_work_dir,
@@ -98,6 +100,14 @@ def run_dynhamr_for_vipe(
         raise RuntimeError("Dyn-HaMR completed but no OBJ files were found")
 
     copied_meshes = copy_meshes(obj_files, output_dir, collection_root)
+    video_output_dir = output_dir / "rendered_videos"
+    copied_videos: list[dict[str, str]] = []
+    for search_root in search_roots:
+        video_files = collect_new_video_files(search_root, seq, run_started_at)
+        if video_files:
+            copied_videos = copy_artifacts(video_files, video_output_dir, search_root)
+            break
+
     manifest = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "dynhamr_root": str(dynhamr_root),
@@ -111,6 +121,8 @@ def run_dynhamr_for_vipe(
         "command": dynhamr_python_cmd + ["run_opt.py"],
         "mesh_count": len(copied_meshes),
         "meshes": copied_meshes,
+        "video_count": len(copied_videos),
+        "videos": copied_videos,
         "logs": {"dynhamr": str(logs_dir / "dynhamr.log")},
     }
     write_manifest(output_dir, "dynhamr_manifest.json", manifest)
@@ -138,7 +150,10 @@ def main() -> None:
         fps=float(args.fps or 30.0),
         is_static=parse_bool(args.is_static),
     )
-    print(f"Generated {manifest['mesh_count']} OBJ meshes", file=sys.stderr)
+    print(
+        f"Generated {manifest['mesh_count']} OBJ meshes and {manifest.get('video_count', 0)} rendered videos",
+        file=sys.stderr,
+    )
     print(args.output_dir.expanduser().resolve())
 
 

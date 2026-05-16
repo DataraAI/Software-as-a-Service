@@ -91,7 +91,7 @@ def main() -> None:
     args = parse_args()
     manifest = run_pipeline(args)
     print(
-        f"Generated {manifest['dynhamr']['mesh_count']} OBJ meshes",
+        f"Generated {manifest['dynhamr']['mesh_count']} OBJ meshes and {manifest['dynhamr'].get('video_count', 0)} rendered videos",
         file=sys.stderr,
     )
     print(args.output_dir.expanduser().resolve())
