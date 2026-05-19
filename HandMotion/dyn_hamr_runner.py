@@ -28,6 +28,16 @@ from runner_common import (
     write_manifest,
 )
 
+
+def _select_src_cam_videos(video_files: list[Path]) -> list[Path]:
+    src_cam_videos = [
+        path for path in video_files if "_src_cam." in path.name.lower()
+    ]
+    if src_cam_videos:
+        return sorted(src_cam_videos)
+    return []
+
+
 def run_dynhamr_for_vipe(
     *,
     data_root: Path,
@@ -75,6 +85,8 @@ def run_dynhamr_for_vipe(
         f"is_static={'True' if is_static else 'False'}",
         "run_opt=True",
         "run_vis=True",
+        "vis.render_views=[src_cam]",
+        "vis.make_grid=False",
     ]
     run_command(
         dynhamr_python_cmd + dynhamr_args,
@@ -105,7 +117,9 @@ def run_dynhamr_for_vipe(
     for search_root in search_roots:
         video_files = collect_new_video_files(search_root, seq, run_started_at)
         if video_files:
-            copied_videos = copy_artifacts(video_files, video_output_dir, search_root)
+            selected_videos = _select_src_cam_videos(video_files)
+            if selected_videos:
+                copied_videos = copy_artifacts(selected_videos, video_output_dir, search_root)
             break
 
     manifest = {
@@ -119,6 +133,7 @@ def run_dynhamr_for_vipe(
         "fps": fps,
         "is_static": is_static,
         "command": dynhamr_python_cmd + ["run_opt.py"],
+        "requested_render_views": ["src_cam"],
         "mesh_count": len(copied_meshes),
         "meshes": copied_meshes,
         "video_count": len(copied_videos),
