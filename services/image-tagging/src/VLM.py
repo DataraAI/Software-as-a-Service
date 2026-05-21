@@ -6,8 +6,7 @@
 
 
 import torch
-from PIL import Image
-from transformers import AutoProcessor, AutoModelForCausalLM
+from transformers import AutoProcessor
 from transformers.image_utils import load_image
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -22,7 +21,7 @@ cv2_imshow(cv2.imread("/content/datara_ai/backend/dataset_list/BMW_Front_Bumper/
 
 #Load Qwen VLM Model
 
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor
+from transformers import Qwen2_5_VLForConditionalGeneration
 from qwen_vl_utils import process_vision_info
 
 # default: Load the model on the available device(s)
@@ -52,7 +51,6 @@ processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
 # from qwen_vl_utils import load_image, load_video
 from transformers.image_utils import load_image
 from transformers.video_utils import load_video
-from qwen_vl_utils import process_vision_info
 
 def generate_text(model, processor, filepath, label, detail):
     # Get media type, image/video

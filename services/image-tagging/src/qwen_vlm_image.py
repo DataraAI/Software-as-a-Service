@@ -1,10 +1,9 @@
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor
+from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
 from qwen_vl_utils import process_vision_info
 
 import argparse
 import json
 import os
-import torch
 import requests
 import nltk
 from nltk.corpus import stopwords
@@ -70,7 +69,7 @@ def main(argv=None):
                 "Use a local path instead, e.g. --egoURL /path/to/image.png"
             ) from e
         raise
-    
+
     inputs = processor(
         text=[text],
         images=image_inputs,
@@ -104,11 +103,11 @@ def main(argv=None):
             vlm_tags.append(k)
 
     schema_output = {"VLM_tags": vlm_tags}
-    
+
     output_path = args.output_json or (os.path.expanduser("~") + "/vlm_tags.json")
     with open(output_path, "w") as f:
         json.dump(schema_output, f, indent=2)
-    
+
     print(output_path)
     return output_path
 

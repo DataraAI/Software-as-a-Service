@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Annotated, Any, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 # App root is the repository root
 APP_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -175,7 +175,7 @@ def run_vlm(body: VlmBody) -> dict[str, Any]:
         "--egoURL",
         body.imageURL,
     ]
-    # This script prints the JSON to stdout or a file. 
+    # This script prints the JSON to stdout or a file.
     # Based on the previous version it might need --output_json if it supports it.
     # Let's assume it prints to stdout or handles its own path.
     printed = _run_script(argv)
@@ -187,5 +187,5 @@ def run_vlm(body: VlmBody) -> dict[str, Any]:
             data = json.loads(Path(printed).read_text())
         else:
             raise HTTPException(status_code=502, detail=f"VLM output invalid: {printed}")
-    
+
     return data

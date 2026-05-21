@@ -9,7 +9,6 @@ Dependencies:
   - opencv-python (required only for video input)
 """
 
-import os
 import logging
 from pathlib import Path
 from typing import List, Tuple

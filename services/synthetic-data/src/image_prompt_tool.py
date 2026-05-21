@@ -15,7 +15,7 @@ _xformers.__spec__ = importlib.util.spec_from_loader("xformers", None, is_packag
 _xformers_ops.__spec__ = importlib.util.spec_from_loader("xformers.ops", None, is_package=False)
 
 
-def _memory_efficient_attention_fallback(query, key, value, attn_bias=None, op=None, scale=None, **kwargs):     
+def _memory_efficient_attention_fallback(query, key, value, attn_bias=None, op=None, scale=None, **kwargs):
     import torch.nn.functional as F
     return F.scaled_dot_product_attention(
         query, key, value, attn_mask=attn_bias, dropout_p=kwargs.get("p", 0.0), scale=scale
@@ -28,9 +28,6 @@ sys.modules["xformers"] = _xformers
 sys.modules["xformers.ops"] = _xformers_ops
 
 import os
-import urllib.request
-from PIL import Image
-from io import BytesIO
 import argparse
 import torch
 from diffusers.utils import load_image
@@ -55,7 +52,7 @@ def main(argv=None):
         imageURL = imageURL[:imageURL.index("?")]
 
     # Example imageURL
-    # https://datara04749.blob.core.windows.net/roboteyeview/automotive/bmw/frontGrille/orig/frontGrille_000.png    
+    # https://datara04749.blob.core.windows.net/roboteyeview/automotive/bmw/frontGrille/orig/frontGrille_000.png
 
     blobPath = imageURL[imageURL.index(container_name) : imageURL.index("/orig") + 5]
     blobPathComponents = blobPath.split("/")
@@ -93,7 +90,7 @@ def main(argv=None):
 
     prompt_for_file = prompt[:promptCommaInd]
     promptSplit = prompt_for_file.split(" ")
-    
+
     base_name = os.path.basename(imageURL)          # frontGrille_000.png
     name_no_ext = os.path.splitext(base_name)[0]    # frontGrille_000
     prompt_joined = "_".join(promptSplit)           # Rotate_right_45_degrees

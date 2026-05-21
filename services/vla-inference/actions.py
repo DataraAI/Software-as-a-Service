@@ -5,8 +5,8 @@ These are the canonical action types that DaaS will consume.
 All backends must produce output that maps to one of these types.
 """
 
-from dataclasses import dataclass, asdict
-from typing import Optional, Union
+from dataclasses import dataclass
+from typing import Union
 
 
 # --- Action type constants ---

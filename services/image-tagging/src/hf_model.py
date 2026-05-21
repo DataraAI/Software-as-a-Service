@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 # Import for type checkers / linters only. At runtime we import inside load_qwen
 if TYPE_CHECKING:
-    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    pass
 
 _MODEL = None
 _PROCESSOR = None
