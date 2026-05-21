@@ -1,0 +1,30 @@
+name: CI - API
+
+on:
+  push:
+    paths:
+      - 'services/api/**'
+      - 'core/**'
+      - 'services/synthetic-data/**'
+      - 'services/image-tagging/**'
+      - '.github/workflows/api-ci.yml'
+  pull_request:
+    paths:
+      - 'services/api/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/api/docker/Dockerfile
+          push: false
+          tags: datara-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

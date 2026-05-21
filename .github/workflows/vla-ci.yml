@@ -1,0 +1,29 @@
+name: CI - VLA Inference
+
+on:
+  push:
+    paths:
+      - 'services/vla-inference/**'
+      - 'core/**'
+      - '.github/workflows/vla-ci.yml'
+  pull_request:
+    paths:
+      - 'services/vla-inference/**'
+      - 'core/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/vla-inference/docker/Dockerfile
+          push: false
+          tags: datara-vla-inference:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

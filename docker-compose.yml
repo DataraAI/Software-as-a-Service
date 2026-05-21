@@ -1,0 +1,42 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: services/api/docker/Dockerfile
+    ports:
+      - "8765:8765"
+    environment:
+      - GPU_API_KEY=${GPU_API_KEY:-}
+      - GPU_JOB_TIMEOUT_S=7200
+    volumes:
+      - ./sample_images:/app/sample_images
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  vla-inference:
+    build:
+      context: .
+      dockerfile: services/vla-inference/docker/Dockerfile
+    volumes:
+      - ./sample_images:/app/sample_images
+      - ./outputs:/app/outputs
+
+  segmentation:
+    build:
+      context: .
+      dockerfile: services/segmentation/docker/Dockerfile
+
+  image-tagging:
+    build:
+      context: .
+      dockerfile: services/image-tagging/docker/Dockerfile
+
+  synthetic-data:
+    build:
+      context: .
+      dockerfile: services/synthetic-data/docker/Dockerfile
