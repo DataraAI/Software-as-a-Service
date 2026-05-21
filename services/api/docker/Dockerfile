@@ -20,10 +20,11 @@ RUN pip install --no-cache-dir .
 COPY core/ /app/core/
 RUN pip install --no-cache-dir ./core
 
-# Copy all services (since API acts as a gateway orchestrator)
-# Note: In a true microservice world, the API would call other services over HTTP.
-# But here it calls them as subprocess scripts. So we need them all in the image.
-COPY services/ /app/services/
+# Copy only the necessary services for the API gateway
+COPY services/api/ /app/services/api/
+COPY services/synthetic-data/src/ /app/services/synthetic-data/src/
+COPY services/image-tagging/src/ /app/services/image-tagging/src/
+COPY services/vla-inference/ /app/services/vla-inference/
 
 # Set PYTHONPATH
 ENV PYTHONPATH="/app"
