@@ -1,0 +1,15 @@
+[project]
+name = "datara-core"
+version = "0.1.0"
+description = "Core library for Datara SaaS"
+dependencies = [
+    "pydantic>=2.0",
+    "numpy",
+    "opencv-python",
+    "mcap-protobuf-support",
+    "foxglove-schemas-protobuf",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

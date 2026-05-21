@@ -1,4 +1,11 @@
 import argparse
+import sys
+from pathlib import Path
+
+# Add services/synthetic-data/src to path
+synth_path = Path(__file__).parent.parent / "services" / "synthetic-data" / "src"
+sys.path.append(str(synth_path))
+
 import image_prompt_tool
 
 

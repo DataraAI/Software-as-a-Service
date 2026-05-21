@@ -1,0 +1,22 @@
+[project]
+name = "vla-inference"
+version = "0.1.0"
+description = "VLA Inference Service"
+dependencies = [
+    "Pillow>=10.0.0",
+    "opencv-python>=4.8.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "transformers>=4.40.0",
+    "huggingface-hub>=0.22.0",
+    "num2words>=0.5.12",
+]
+
+[project.optional-dependencies]
+lerobot = [
+    "lerobot @ git+https://github.com/huggingface/lerobot.git"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

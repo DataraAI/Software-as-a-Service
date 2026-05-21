@@ -1,33 +1,66 @@
-# Software as a Service platform
+# Datara SaaS Platform
 
-## Usage
+A sophisticated platform for Robotics and Vision, combining synthetic data generation, video segmentation, 3D hand tracking, and Vision-Language-Action (VLA) inference.
 
-### DataraAI_segmentation.py
+## Project Structure
 
-```python
-python DataraAI_segmentation.py \
-    --video_path path/to/video.mp4 \
-    --segment "humans"
+This repository follows a modular micro-service architecture to ensure dependency isolation and efficient CI/CD.
+
+```text
+Datara-SaaS/
+├── core/                         # Shared Internal Library (Low-dependency)
+│   ├── datara_core/
+│   │   ├── io/                   # Media loading, image/video utils, MCAP writers
+│   │   ├── schemas/              # Unified Action & Annotation schemas (Pydantic)
+│   │   └── config.py             # Global settings (env vars, device maps)
+│
+├── services/                     # Independent ML Microservices (Heavy-dependency)
+│   ├── vla-inference/            # Action generation (lerobot, torch-cuda)
+│   ├── image-tagging/            # Qwen-based annotation (transformers, torch)
+│   ├── segmentation/             # SAM3 Mask generation (specialized SAM3 env)
+│   └── synthetic-data/           # Corner case generation (diffusers, controlnet)
+│
+├── pipelines/                    # Multi-service Orchestration
+│   ├── annotation_pipeline.py    # Calls segmentation -> inpainting -> tagging
+│   └── hand_motion_capture.py    # Calls mediapipe -> mcap
+│
+└── .github/workflows/            # Granular CI/CD
 ```
+
+## Services Overview
+
+### VLA Inference
+Produces robot arm action files from video or image input.
+- **Location:** `services/vla-inference/`
+- **Key Models:** Pi0, SmolVLA, OpenVLA.
+
+### Image Tagging (VLM)
+Generates semantic tags for images using Qwen 2.5 VL.
+- **Location:** `services/image-tagging/`
+
+### Segmentation (SAM3)
+Generates object masks (e.g., humans) from video sequences.
+- **Location:** `services/segmentation/`
+
+### Synthetic Data (Corner Cases)
+Generates synthetic "corner case" images using Stable Diffusion + ControlNet.
+- **Location:** `services/synthetic-data/`
+
+## Core Library
+The `core/` directory contains shared logic that is common across multiple services, such as:
+- MCAP file generation for Foxglove Studio.
+- Common media I/O utilities.
+- Pydantic schemas for data exchange.
+
+## CI/CD Strategy
+Each service in `services/` is designed to be built and deployed independently.
+- **Dependency Isolation:** Services can use different versions of Torch/CUDA without conflicts.
+- **Granular Triggers:** CI workflows only run on changes to their respective service directories.
 
 ## Setup
 
-This is being used on a Ubuntu 24.03 LTS VM, connected to a GH200 GPU with arm64.
+This platform is optimized for Ubuntu 24.03 LTS with GH200 (ARM64) or NVIDIA RTX 3080+ GPUs.
 
-### Dependency Issues
-
-#### SAM3
-
-The decord package is not compatible for arm64 systems, so we're replacing it with cv2's VideoCapture.
-
-```python
-# video = VideoReader(video_path, ctx=cpu(0))
-cap = cv2.VideoCapture(video_path)
-frames = []
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
-    frames.append(frame)
-cap.release()
-```
+### Development
+1. Install [Ruff](https://github.com/astral-sh/ruff) for linting.
+2. Each service has its own `requirements.txt` or `pyproject.toml`.

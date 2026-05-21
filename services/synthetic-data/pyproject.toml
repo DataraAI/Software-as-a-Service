@@ -1,0 +1,16 @@
+[project]
+name = "synthetic-data"
+version = "0.1.0"
+description = "Synthetic data generation service"
+dependencies = [
+    "torch",
+    "diffusers",
+    "transformers",
+    "accelerate",
+    "pillow",
+    "numpy",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

@@ -5,7 +5,14 @@ import os
 from PIL import Image
 import numpy as np
 
-import DataraAI_segmentation
+import sys
+from pathlib import Path
+
+# Add services/segmentation/src to path
+seg_path = Path(__file__).parent.parent / "services" / "segmentation" / "src"
+sys.path.append(str(seg_path))
+
+import segmentation as DataraAI_segmentation
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--video_path", type=str, help="input MP4 video_path")
