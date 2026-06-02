@@ -57,12 +57,16 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 def conda_base() -> str:
     """Return the conda installation root."""
-    result = subprocess.run(
-        ["conda", "info", "--base"],
-        capture_output=True, text=True
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip()
+    try:
+        result = subprocess.run(
+            ["conda", "info", "--base"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except FileNotFoundError:
+        # If the OS can't find the 'conda' command at all, log it and move on
+        print("Warning: 'conda' command not found globally. Using default fallback path.")
     return "/home/ubuntu/miniconda3"
 
 
