@@ -92,6 +92,7 @@ def main(argv=None):
     parser.add_argument("--video_url",    type=str, required=True)
     parser.add_argument("--output_dir",   type=str, required=True)
     parser.add_argument("--vipe_zip_url", type=str, default=None)
+    parser.add_argument("--trajectory", type=str, default="left", choices=["up", "down", "left", "right", "zoom_in", "zoom_out"])
     args = parser.parse_args(argv)
 
     output_dir      = Path(args.output_dir).resolve()
@@ -168,7 +169,7 @@ def main(argv=None):
         f"--disable_prompt_upsampler "
         f"--num_gpus 1 "
         f"--foreground_masking "
-        f"--multi_trajectory"
+        f"--trajectory {args.trajectory}"
     )
     _run(
         [str(CONDA_BIN), "run", "-n", LYRA_CONDA_ENV, "bash", "-c", gen3c_bash_cmd],
@@ -179,7 +180,7 @@ def main(argv=None):
     # ------------------------------------------------------------------
     # Step 5: Locate the Gen3C output video
     # ------------------------------------------------------------------
-    gen3c_output_video = gen3c_output_dir / "0" / "rgb" / "input.mp4"
+    gen3c_output_video = gen3c_output_dir / "rgb" / "input.mp4"
     if not gen3c_output_video.is_file():
         print(f"[lyra_v2v] Expected Gen3C output not found: {gen3c_output_video}", file=sys.stderr)
         sys.exit(1)
