@@ -499,6 +499,32 @@ def main() -> None:
     log.info("  DynHaMR   : %s", fmt_duration(dynhamr_elapsed))
     log.info("  Total     : %s", fmt_duration(total))
 
+    # --- Emit output sentinels for the caller to parse ---
+    # DynHaMR writes results under: <dynhamr_dir>/output/logs/video-custom/<date>/<seq>-*/
+    # We search for the _src_cam video and all .obj files and print their paths
+    # so call_lambda_vm.py doesn't need to do any directory discovery itself.
+    dynhamr_output_root = Path(DYNHAMR_DIR) / ".." / "output" / "logs" / "video-custom"
+
+    log.info("Searching for outputs under: %s", dynhamr_output_root)
+    log.info("Directory exists: %s", dynhamr_output_root.exists())
+    
+    # List everything found to help diagnose
+    if dynhamr_output_root.exists():
+        all_files = sorted(dynhamr_output_root.rglob("*"))
+        log.info("All files found (%d):", len(all_files))
+        for f in all_files:
+            log.info("  %s", f)
+    else:
+        log.warning("Output root does not exist: %s", dynhamr_output_root)
+        
+    src_cam_videos = sorted(dynhamr_output_root.rglob(f"*_src_cam.mp4"))
+    obj_files = sorted(dynhamr_output_root.rglob("*.obj"))
+
+    for video_file in src_cam_videos:
+        print(f"OUTPUT_VIDEO: {video_file}")
+
+    for obj_file in obj_files:
+        print(f"OUTPUT_OBJ: {obj_file}")
 
 if __name__ == "__main__":
     main()
