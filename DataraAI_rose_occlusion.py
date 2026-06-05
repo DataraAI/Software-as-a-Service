@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,26 +13,66 @@ import cv2
 
 
 SUPPORTED_WINDOW_LENGTHS = (17, 33, 49)
+DEFAULT_ROSE_ROOT = str(Path.home() / "packages" / "ROSE")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run ROSE inpainting on a source/mask video pair")
-    parser.add_argument("--source_video", required=True)
-    parser.add_argument("--mask_video", required=True)
-    parser.add_argument("--output_dir", required=True)
-    parser.add_argument("--prompt", required=True)
+    parser.add_argument("--source_video")
+    parser.add_argument("--mask_video")
+    parser.add_argument("--output_dir")
+    parser.add_argument("--prompt")
     parser.add_argument("--video_length", type=int, default=49)
     parser.add_argument("--sample_height", type=int, default=480)
     parser.add_argument("--sample_width", type=int, default=720)
-    return parser.parse_args()
+    parser.add_argument("--verify-only", action="store_true")
+    args = parser.parse_args()
+
+    if args.verify_only:
+        return args
+
+    missing = [
+        flag
+        for flag, value in (
+            ("--source_video", args.source_video),
+            ("--mask_video", args.mask_video),
+            ("--output_dir", args.output_dir),
+            ("--prompt", args.prompt),
+        )
+        if not value
+    ]
+    if missing:
+        parser.error("Missing required arguments: " + ", ".join(missing))
+    return args
 
 
 def ensure_supported_window_length(length: int) -> int:
-    if length in SUPPORTED_WINDOW_LENGTHS:
-        return length
-    if length < SUPPORTED_WINDOW_LENGTHS[0]:
-        return SUPPORTED_WINDOW_LENGTHS[0]
-    return SUPPORTED_WINDOW_LENGTHS[-1]
+    return min(SUPPORTED_WINDOW_LENGTHS, key=lambda candidate: (abs(candidate - length), candidate))
+
+
+def resolve_runtime_paths() -> tuple[str, str, str]:
+    rose_root = os.getenv("ROSE_ROOT", DEFAULT_ROSE_ROOT)
+    rose_python = os.getenv("ROSE_PYTHON_BIN", sys.executable)
+    inference_path = os.path.join(rose_root, "inference.py")
+
+    if not os.path.isdir(rose_root):
+        raise FileNotFoundError(f"ROSE root was not found: {rose_root}")
+    if not os.path.isfile(inference_path):
+        raise FileNotFoundError(f"ROSE inference entrypoint was not found: {inference_path}")
+
+    if os.path.dirname(rose_python):
+        if not os.path.isfile(rose_python):
+            raise FileNotFoundError(f"ROSE python interpreter was not found: {rose_python}")
+    elif shutil.which(rose_python) is None:
+        raise FileNotFoundError(f"ROSE python interpreter was not found on PATH: {rose_python}")
+
+    return rose_root, rose_python, inference_path
+
+
+def verify_runtime() -> tuple[str, str, str]:
+    rose_root, rose_python, inference_path = resolve_runtime_paths()
+    print(f"ROSE runtime verified: root={rose_root} python={rose_python}")
+    return rose_root, rose_python, inference_path
 
 
 def read_video_frames(video_path: str) -> tuple[list, float]:
@@ -130,11 +171,9 @@ def find_generated_video(output_dir: str) -> str:
 def main() -> None:
     args = parse_args()
 
-    rose_root = os.getenv("ROSE_ROOT", os.path.expanduser("~/ROSE"))
-    rose_python = os.getenv("ROSE_PYTHON_BIN", sys.executable)
-    inference_path = os.path.join(rose_root, "inference.py")
-    if not os.path.isfile(inference_path):
-        raise FileNotFoundError(f"ROSE inference entrypoint was not found: {inference_path}")
+    rose_root, rose_python, inference_path = verify_runtime()
+    if args.verify_only:
+        return
 
     source_frames, source_fps = read_video_frames(args.source_video)
     mask_frames, _mask_fps = read_video_frames(args.mask_video)
