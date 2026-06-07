@@ -1,341 +1,282 @@
+"""ADDIT + SAM2 corner-case generation entrypoint for Datara SaaS.
+
+The DaaS backend calls this script over SSH and expects the final stdout line
+to be the absolute path of the generated image.
 """
-Stub xformers.ops before any diffusers import to avoid triton compatibility errors
-(JITCallable._set_src / 'Cannot set attribute src directly' with PyTorch 2.7+).
-"""
-import importlib.util
-import sys
-import types
 
-_xformers = types.ModuleType("xformers")
-_xformers_ops = types.ModuleType("xformers.ops")
-_xformers.__spec__ = importlib.util.spec_from_loader("xformers", None, is_package=True)
-_xformers_ops.__spec__ = importlib.util.spec_from_loader("xformers.ops", None, is_package=False)
-
-
-def _memory_efficient_attention_fallback(query, key, value, attn_bias=None, op=None, scale=None, **kwargs):
-    import torch.nn.functional as F
-    return F.scaled_dot_product_attention(
-        query, key, value, attn_mask=attn_bias, dropout_p=kwargs.get("p", 0.0), scale=scale
-    )
-
-
-_xformers_ops.memory_efficient_attention = _memory_efficient_attention_fallback
-_xformers.ops = _xformers_ops
-sys.modules["xformers"] = _xformers
-sys.modules["xformers.ops"] = _xformers_ops
+from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.util
 import os
-from urllib.parse import urlparse
+import re
+import sys
+import types
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
-import numpy as np
+
+def _install_xformers_fallback() -> None:
+    """Provide the tiny xformers API surface ADDIT expects on ARM64 installs."""
+    xformers = types.ModuleType("xformers")
+    xformers_ops = types.ModuleType("xformers.ops")
+    xformers.__spec__ = importlib.util.spec_from_loader("xformers", None, is_package=True)
+    xformers_ops.__spec__ = importlib.util.spec_from_loader("xformers.ops", None, is_package=False)
+
+    def memory_efficient_attention(query, key, value, attn_bias=None, op=None, scale=None, **kwargs):
+        import torch.nn.functional as functional
+
+        _ = op
+        return functional.scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=attn_bias,
+            dropout_p=kwargs.get("p", 0.0),
+            scale=scale,
+        )
+
+    xformers_ops.memory_efficient_attention = memory_efficient_attention
+    xformers.ops = xformers_ops
+    sys.modules["xformers"] = xformers
+    sys.modules["xformers.ops"] = xformers_ops
+
+
+_install_xformers_fallback()
+
+
+def _bootstrap_addit_path(argv: list[str] | None) -> str:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--addit_root", default=os.getenv("ADDIT_ROOT", "/home/ubuntu/packages/addit"))
+    known_args, _ = parser.parse_known_args(argv)
+    addit_root = os.path.abspath(os.path.expanduser(known_args.addit_root))
+    if addit_root not in sys.path:
+        sys.path.insert(0, addit_root)
+    return addit_root
+
+
+ADDIT_ROOT = _bootstrap_addit_path(sys.argv[1:])
+
 import torch
-from PIL import Image, ImageDraw
-
-from diffusers import (
-    ControlNetModel,
-    StableDiffusionControlNetInpaintPipeline,
-    DDIMScheduler,
-)
 from diffusers.utils import load_image
+from PIL import Image
+
+from addit_flux_pipeline import AdditFluxPipeline
+from addit_flux_transformer import AdditFluxTransformer2DModel
+from addit_methods import add_object_real
+from addit_scheduler import AdditFlowMatchEulerDiscreteScheduler
 
 
-def make_inpaint_condition(image: Image.Image, mask_image: Image.Image) -> torch.Tensor:
-    image_np = np.array(image.convert("RGB")).astype(np.float32) / 255.0
-    mask_np = np.array(mask_image.convert("L")).astype(np.float32) / 255.0
-    assert image_np.shape[0:2] == mask_np.shape[0:2], "image and mask must have same HxW"
+STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "at",
+    "by",
+    "create",
+    "generate",
+    "insert",
+    "make",
+    "of",
+    "on",
+    "onto",
+    "place",
+    "put",
+    "some",
+    "the",
+    "to",
+    "with",
+    "add",
+    "adding",
+    "added",
+    "case",
+    "corner",
+    "image",
+    "photo",
+    "scene",
+    "view",
+    "red",
+    "blue",
+    "green",
+    "yellow",
+    "orange",
+    "purple",
+    "black",
+    "white",
+    "gray",
+    "grey",
+    "brown",
+    "small",
+    "large",
+    "big",
+    "tiny",
+}
 
-    image_np[mask_np > 0.5] = -1.0
-    image_np = np.expand_dims(image_np, 0).transpose(0, 3, 1, 2)
-    return torch.from_numpy(image_np)
 
-#Fix to resizing: letterboxing - added padding so image stays 512x512 while maintaining aspect ratio
-def letterbox_to_square(image: Image.Image, target_size: int = 512, fill=0, resample=Image.Resampling.LANCZOS):
-    w, h = image.size
-    scale = min(target_size / w, target_size / h)
-    new_w = max(1, int(round(w * scale)))
-    new_h = max(1, int(round(h * scale)))
+def _log(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
 
-    resized = image.resize((new_w, new_h), resample)
 
-    if image.mode == "RGB":
-        canvas = Image.new("RGB", (target_size, target_size), fill)
-    else:
-        canvas = Image.new(image.mode, (target_size, target_size), fill)
+def _slugify(value: str, *, max_length: int = 64, fallback: str = "corner_case") -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    return (slug[:max_length].strip("_") or fallback)
 
-    x0 = (target_size - new_w) // 2
-    y0 = (target_size - new_h) // 2
+
+def infer_subject_token(prompt: str) -> str:
+    colon_match = re.match(r"^\s*([A-Za-z][A-Za-z0-9_-]{0,48})\s*:", prompt)
+    if colon_match:
+        return colon_match.group(1).lower()
+
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9_-]*", prompt.lower())
+    for token in tokens:
+        if token not in STOPWORDS:
+            return token
+    if tokens:
+        return tokens[0]
+    raise ValueError("Could not infer an ADDIT subject token from the prompt.")
+
+
+def letterbox_to_square(
+    image: Image.Image,
+    target_size: int = 1024,
+    fill: tuple[int, int, int] = (0, 0, 0),
+    resample: int = Image.Resampling.LANCZOS,
+) -> tuple[Image.Image, tuple[int, int, int, int]]:
+    width, height = image.size
+    scale = min(target_size / width, target_size / height)
+    resized_width = max(1, int(round(width * scale)))
+    resized_height = max(1, int(round(height * scale)))
+    resized = image.resize((resized_width, resized_height), resample)
+
+    canvas = Image.new("RGB", (target_size, target_size), fill)
+    x0 = (target_size - resized_width) // 2
+    y0 = (target_size - resized_height) // 2
     canvas.paste(resized, (x0, y0))
-
-    content_box = (x0, y0, x0 + new_w, y0 + new_h)
-    return canvas, content_box
+    return canvas, (x0, y0, x0 + resized_width, y0 + resized_height)
 
 
-def unletterbox_and_resize(image: Image.Image, content_box, output_size):
-
+def unletterbox_and_resize(image: Image.Image, content_box: tuple[int, int, int, int], output_size: tuple[int, int]) -> Image.Image:
     cropped = image.crop(content_box)
     return cropped.resize(output_size, Image.Resampling.LANCZOS)
 
 
-def preset_mask(name: str, size=(512, 512), content_box=None) -> Image.Image:
-    w, h = size
-    mask = Image.new("L", (w, h), 0)
-    draw = ImageDraw.Draw(mask)
+def build_output_path(*, out_root: str, container_name: str, image_url: str, prompt: str, subject_token: str, seed_obj: int) -> Path:
+    root = Path(os.path.expanduser(out_root))
+    if not root.is_absolute():
+        root = Path.cwd() / root
 
-    if content_box is None:
-        x_base0, y_base0, x_base1, y_base1 = 0, 0, w, h
-    else:
-        x_base0, y_base0, x_base1, y_base1 = content_box
+    parsed = urlparse(image_url.split("?", 1)[0])
+    source_name = unquote(os.path.basename(parsed.path)) or "source.png"
+    source_stem = _slugify(os.path.splitext(source_name)[0], max_length=50, fallback="source")
+    prompt_slug = _slugify(prompt, max_length=50)
+    subject_slug = _slugify(subject_token, max_length=24, fallback="object")
+    prompt_hash = hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:8]
+    filename = f"{source_stem}_addit_{subject_slug}_{prompt_slug}_{prompt_hash}_seed{seed_obj}.png"
+    return (root / container_name / filename).resolve()
 
-    cw = x_base1 - x_base0
-    ch = y_base1 - y_base0
 
-    def rect(x0f, y0f, x1f, y1f):
-        draw.rectangle(
-            [
-                int(x_base0 + x0f * cw),
-                int(y_base0 + y0f * ch),
-                int(x_base0 + x1f * cw),
-                int(y_base0 + y1f * ch),
-            ],
-            fill=255
-        )
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate one ADDIT corner-case image.")
+    parser.add_argument("--prompt", required=True)
+    parser.add_argument("--imageURL", required=True)
+    parser.add_argument("--container_name", required=True)
+    parser.add_argument("--prompt_source", default=os.getenv("ADDIT_PROMPT_SOURCE", "A photo in an industrial warehouse"))
+    parser.add_argument("--subject_token", default="")
+    parser.add_argument("--seed_src", type=int, default=6311)
+    parser.add_argument("--seed_obj", type=int, default=1)
+    parser.add_argument("--extended_scale", type=float, default=1.1)
+    parser.add_argument("--structure_transfer_step", type=int, default=4)
+    parser.add_argument("--blend_step", type=int, default=18)
+    parser.add_argument("--localization_model", default=os.getenv("ADDIT_LOCALIZATION_MODEL", "attention_points_sam"))
+    parser.add_argument("--show_attention", action="store_true")
+    parser.add_argument("--disable_inversion", action="store_true")
+    parser.add_argument("--use_offset", action="store_true")
+    parser.add_argument("--out_root", default=os.getenv("ADDIT_CORNER_OUT_ROOT", "corner_images_controlnet"))
+    parser.add_argument("--addit_root", default=ADDIT_ROOT)
+    parser.add_argument("--model_id", default=os.getenv("ADDIT_MODEL_ID", "black-forest-labs/FLUX.1-dev"))
+    parser.add_argument("--image_size", type=int, default=1024)
+    return parser.parse_args(argv)
 
-    def ellipse(x0f, y0f, x1f, y1f):
-        draw.ellipse(
-            [
-                int(x_base0 + x0f * cw),
-                int(y_base0 + y0f * ch),
-                int(x_base0 + x1f * cw),
-                int(y_base0 + y1f * ch),
-            ],
-            fill=255
-        )
 
-    # Ground / floor-like regions
-    if name == "ground_center":
-        rect(0.25, 0.72, 0.75, 0.98)
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    prompt = args.prompt.strip()
+    if not prompt:
+        raise ValueError("Missing prompt.")
 
-    elif name == "ground_left":
-        rect(0.02, 0.72, 0.42, 0.98)
-
-    elif name == "ground_right":
-        rect(0.58, 0.72, 0.98, 0.98)
-
-    elif name == "ground_band":
-        rect(0.00, 0.72, 1.00, 0.98)
-
-    elif name == "ground_center_wide":
-        rect(0.15, 0.70, 0.85, 0.98)
-
-    # Middle regions
-    elif name == "middle_center":
-        rect(0.28, 0.35, 0.72, 0.72)
-
-    elif name == "middle_left":
-        rect(0.02, 0.35, 0.42, 0.72)
-
-    elif name == "middle_right":
-        rect(0.58, 0.35, 0.98, 0.72)
-
-    elif name == "middle_band":
-        rect(0.00, 0.35, 1.00, 0.72)
-
-    # Top regions
-    elif name == "top_center":
-        rect(0.28, 0.02, 0.72, 0.30)
-
-    elif name == "top_left":
-        rect(0.02, 0.02, 0.42, 0.30)
-
-    elif name == "top_right":
-        rect(0.58, 0.02, 0.98, 0.30)
-
-    elif name == "top_band":
-        rect(0.00, 0.00, 1.00, 0.30)
-
-    # Side regions
-    elif name == "left_band":
-        rect(0.00, 0.00, 0.30, 1.00)
-
-    elif name == "right_band":
-        rect(0.70, 0.00, 1.00, 1.00)
-
-    # Central box
-    elif name == "center_box":
-        rect(0.20, 0.20, 0.80, 0.80)
-
-    # Spill / puddle shapes
-    elif name == "puddle_center":
-        ellipse(0.30, 0.78, 0.70, 0.95)
-
-    elif name == "puddle_left":
-        ellipse(0.05, 0.78, 0.40, 0.95)
-
-    elif name == "puddle_right":
-        ellipse(0.60, 0.78, 0.95, 0.95)
-
-    # Vertical/taller shape for fire/smoke near a machine/car
-    elif name == "vertical_center":
-        rect(0.38, 0.30, 0.62, 0.92)
-
-    elif name == "vertical_left":
-        rect(0.10, 0.30, 0.34, 0.92)
-
-    elif name == "vertical_right":
-        rect(0.66, 0.30, 0.90, 0.92)
-
-    else:
+    subject_token = (args.subject_token or infer_subject_token(prompt)).strip().lower()
+    prompt_source = args.prompt_source.strip()
+    prompt_target = f"{prompt_source}, {prompt}"
+    if subject_token not in prompt_target.lower():
         raise ValueError(
-            f"Unknown mask preset: {name}. "
-            f"Try ground_center, ground_left, ground_right, middle_center, "
-            f"top_center, left_band, right_band, puddle_center, vertical_center."
+            f"subject_token='{subject_token}' must appear in the effective prompt. "
+            "Pass --subject_token explicitly or include it in --prompt."
         )
 
-    return mask
-
-
-def main(argv=None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--prompt", type=str, required=True)
-    parser.add_argument("--imageURL", type=str, required=True)
-    parser.add_argument("--container_name", type=str, required=True)
-    parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--negative_prompt", type=str, default="lowres, blurry, bad anatomy, artifacts")
-    parser.add_argument("--steps", type=int, default=25)
-    parser.add_argument("--guidance", type=float, default=7.5)
-    parser.add_argument("--maskURL", type=str, default=None)
-    parser.add_argument("--mask_path", type=str, default=None)
-    parser.add_argument("--mask_preset", type=str, default=None)
-    parser.add_argument("--out_root", type=str, default=os.path.expanduser("~/corner_images_controlnet"))
-
-    args, _ = parser.parse_known_args(argv)
-    prompt = args.prompt
-    imageURL = args.imageURL
-
-    if "?" in imageURL:
-        imageURL = imageURL[: imageURL.index("?")]
-
-    container_name = args.container_name
-
-    # Load original image and remember original size
-    original_image = load_image(imageURL).convert("RGB")
+    _log(f"ADDIT root: {ADDIT_ROOT}")
+    _log(f"Loading source image: {args.imageURL.split('?', 1)[0]}")
+    original_image = load_image(args.imageURL).convert("RGB")
     original_size = original_image.size
-
-    # Letterbox to 512x512 instead of stretching
-    init_image, content_box = letterbox_to_square(
-        original_image,
-        target_size=512,
-        fill=(0, 0, 0),
-        resample=Image.Resampling.LANCZOS,
-    )
-
-    # Build/load mask in a way that stays aligned with the letterboxed image
-    if args.mask_path:
-        raw_mask = Image.open(args.mask_path).convert("L")
-        mask_image, _ = letterbox_to_square(
-            raw_mask,
-            target_size=512,
-            fill=0,
-            resample=Image.Resampling.LANCZOS,
-        )
-    elif args.maskURL:
-        raw_mask = load_image(args.maskURL).convert("L")
-        mask_image, _ = letterbox_to_square(
-            raw_mask,
-            target_size=512,
-            fill=0,
-            resample=Image.Resampling.LANCZOS,
-        )
-    elif args.mask_preset:
-        mask_image = preset_mask(args.mask_preset, size=(512, 512), content_box=content_box)
-    else:
-        print("Warning: No mask, maskURL, or mask_preset provided. Using an empty mask.")
-        mask_image = Image.new("L", (512, 512), 0)
-
-    control_image = make_inpaint_condition(init_image, mask_image)
-
-    # Load models
-    base_model = "stable-diffusion-v1-5/stable-diffusion-v1-5"
-    controlnet_id = "lllyasviel/control_v11p_sd15_inpaint"
+    source_image, content_box = letterbox_to_square(original_image, target_size=args.image_size)
 
     dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-
-    controlnet = ControlNetModel.from_pretrained(controlnet_id, torch_dtype=dtype)
-
-    pipe = StableDiffusionControlNetInpaintPipeline.from_pretrained(
-        base_model,
-        controlnet=controlnet,
+    _log(f"Loading ADDIT model {args.model_id} with dtype={dtype}")
+    transformer = AdditFluxTransformer2DModel.from_pretrained(
+        args.model_id,
+        subfolder="transformer",
         torch_dtype=dtype,
-        safety_checker=None,
-        requires_safety_checker=False,
     )
-
-    pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+    pipe = AdditFluxPipeline.from_pretrained(
+        args.model_id,
+        transformer=transformer,
+        torch_dtype=dtype,
+    )
+    pipe.scheduler = AdditFlowMatchEulerDiscreteScheduler.from_config(pipe.scheduler.config)
 
     if torch.cuda.is_available():
-        try:
-            pipe.enable_model_cpu_offload()
-        except Exception:
-            pipe = pipe.to("cuda")
-        pipe.enable_attention_slicing()
+        pipe.enable_model_cpu_offload()
     else:
-        pipe = pipe.to("cpu")
+        pipe.to("cpu")
 
-    gen = torch.Generator(device="cpu").manual_seed(args.seed)
-
-    out = pipe(
-        prompt=prompt,
-        negative_prompt=args.negative_prompt,
-        num_inference_steps=args.steps,
-        guidance_scale=args.guidance,
-        generator=gen,
-        image=init_image,
-        mask_image=mask_image,
-        control_image=control_image,
+    _log(
+        "Running ADDIT with "
+        f"subject_token={subject_token}, localization_model={args.localization_model}, seed_obj={args.seed_obj}"
     )
+    with torch.inference_mode():
+        _, edited_image = add_object_real(
+            pipe,
+            source_image=source_image,
+            prompt_source=prompt_source,
+            prompt_object=prompt_target,
+            subject_token=subject_token,
+            seed_src=args.seed_src,
+            seed_obj=args.seed_obj,
+            extended_scale=args.extended_scale,
+            structure_transfer_step=args.structure_transfer_step,
+            blend_steps=[args.blend_step],
+            localization_model=args.localization_model,
+            use_offset=args.use_offset,
+            show_attention=args.show_attention,
+            use_inversion=not args.disable_inversion,
+            display_output=False,
+        )
 
-    image = out.images[0]
+    edited_image = unletterbox_and_resize(edited_image, content_box, original_size)
+    output_path = build_output_path(
+        out_root=args.out_root,
+        container_name=args.container_name,
+        image_url=args.imageURL,
+        prompt=prompt,
+        subject_token=subject_token,
+        seed_obj=args.seed_obj,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    edited_image.save(output_path)
 
-    # Remove padding and resize back to original dimensions
-    image = unletterbox_and_resize(image, content_box, original_size)
-
-    # file name logic
-    prompt_for_name = prompt
-    promptCommaInd = prompt_for_name.index(",") if "," in prompt_for_name else len(prompt_for_name)
-    prompt_for_name = prompt_for_name[:promptCommaInd]
-    promptSplit = prompt_for_name.split(" ")
-
-    base_name = os.path.basename(imageURL)
-    name_no_ext = os.path.splitext(base_name)[0]
-    prompt_joined = "_".join(promptSplit)
-
-    new_filename = f"{name_no_ext}_cn_cc_{prompt_joined}_seed{args.seed}.png"
-
-    parsed_url = urlparse(imageURL)
-    path_segments = [segment for segment in parsed_url.path.split("/") if segment]
-
-    try:
-        container_idx = path_segments.index(container_name)
-    except ValueError:
-        print(f"Warning: Container name '{container_name}' not found in the URL path. Saving to 'corner_images_controlnet/default_output/'.")
-        blob_output_dir_components = ["default_output"]
-    else:
-        blob_output_dir_components = path_segments[container_idx:-1]
-
-        if blob_output_dir_components:
-            blob_output_dir_components[-1] = "corner_cases"
-        else:
-            blob_output_dir_components = [container_name, "corner_cases"]
-
-    out_root = os.path.expanduser(args.out_root)
-    imageFilepath = os.path.join(out_root, *blob_output_dir_components)
-    os.makedirs(imageFilepath, exist_ok=True)
-    imageFilepath = os.path.join(imageFilepath, new_filename)
-
-    image.save(imageFilepath)
-    print(imageFilepath)
+    print(str(output_path), flush=True)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
