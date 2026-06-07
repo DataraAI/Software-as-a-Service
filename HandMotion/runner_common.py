@@ -1,0 +1,389 @@
+"""Shared helpers for ViPE and Dyn-HaMR SaaS runners.
+
+These helpers assume the required tools are already installed on the VM.
+They do not clone repositories or create environments at runtime.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+VALID_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"}
+CONDA_ENV_ROOT_CANDIDATES = (
+    Path("~/miniconda3/envs").expanduser(),
+    Path("~/mambaforge/envs").expanduser(),
+    Path("~/anaconda3/envs").expanduser(),
+    Path("~/.conda/envs").expanduser(),
+    Path("~/micromamba/envs").expanduser(),
+    Path("~/.local/share/mamba/envs").expanduser(),
+    Path("~/.local/share/micromamba/envs").expanduser(),
+)
+
+
+def parse_bool(value: str | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def image_sort_key(path: Path) -> tuple[int, int, str]:
+    stem = path.stem
+    match = re.search(r"_(\d+)(?:_|$)", stem)
+    if match:
+        return (0, int(match.group(1)), path.name.lower())
+    if stem.isdigit():
+        return (0, int(stem), path.name.lower())
+    return (1, 0, path.name.lower())
+
+
+def collect_images(image_dir: Path) -> list[Path]:
+    images = [
+        path
+        for path in image_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in VALID_IMAGE_EXTENSIONS
+    ]
+    return sorted(images, key=image_sort_key)
+
+
+def normalize_frame(frame: Any) -> Any:
+    import cv2
+
+    if frame.ndim == 2:
+        return cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    if frame.shape[2] == 4:
+        return cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+    return frame
+
+
+def build_video(image_paths: list[Path], output_path: Path, fps: float) -> dict[str, int | float]:
+    import cv2
+
+    if not image_paths:
+        raise ValueError("No source images were provided")
+
+    first = cv2.imread(str(image_paths[0]), cv2.IMREAD_UNCHANGED)
+    if first is None:
+        raise ValueError(f"Could not read {image_paths[0]}")
+    first = normalize_frame(first)
+    height, width = first.shape[:2]
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = cv2.VideoWriter(
+        str(output_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        float(fps),
+        (width, height),
+    )
+    if not writer.isOpened():
+        raise RuntimeError(f"Could not open video writer for {output_path}")
+
+    try:
+        for image_path in image_paths:
+            frame = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
+            if frame is None:
+                raise ValueError(f"Could not read {image_path}")
+            frame = normalize_frame(frame)
+            if frame.shape[:2] != (height, width):
+                frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+            writer.write(frame)
+    finally:
+        writer.release()
+
+    return {
+        "frame_count": len(image_paths),
+        "fps": float(fps),
+        "width": width,
+        "height": height,
+    }
+
+
+def default_dynhamr_root() -> Path:
+    candidates = [
+        Path(os.environ.get("DYNHAMR_ROOT", "")).expanduser() if os.environ.get("DYNHAMR_ROOT") else None,
+        Path("~/packages/Dyn-Hamr").expanduser(),
+        Path("~/packages/Dyn-HaMR").expanduser(),
+        Path("~/packages/Dyn-HAMR").expanduser(),
+    ]
+    for candidate in candidates:
+        if candidate and candidate.exists():
+            return candidate.resolve()
+    return Path("~/packages/Dyn-Hamr").expanduser().resolve()
+
+
+def default_vipe_root() -> Path:
+    candidates = [
+        Path(os.environ.get("VIPE_ROOT", "")).expanduser() if os.environ.get("VIPE_ROOT") else None,
+        Path("~/packages/ViPE").expanduser(),
+        Path("~/packages/vipe").expanduser(),
+    ]
+    for candidate in candidates:
+        if candidate and candidate.exists():
+            return candidate.resolve()
+    return Path("~/packages/ViPE").expanduser().resolve()
+
+
+def locate_dynhamr_work_dir(dynhamr_root: Path) -> Path:
+    nested = dynhamr_root / "dyn-hamr"
+    if (nested / "run_opt.py").is_file():
+        return nested
+    if (dynhamr_root / "run_opt.py").is_file():
+        return dynhamr_root
+    raise FileNotFoundError(f"Could not find run_opt.py under {dynhamr_root}")
+
+
+def default_vipe_work_dir() -> Path:
+    configured = os.environ.get("VIPE_WORK_DIR")
+    if configured:
+        candidate = Path(configured).expanduser()
+        if candidate.exists():
+            return candidate.resolve()
+    vipe_root = default_vipe_root()
+    if vipe_root.exists():
+        return vipe_root
+    return Path.cwd().resolve()
+
+
+def _is_explicit_path(value: str) -> bool:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return False
+    return (
+        normalized.startswith(("~", ".", "/", "\\"))
+        or "/" in normalized
+        or "\\" in normalized
+    )
+
+
+def _resolve_existing_path(value: str | os.PathLike[str] | None) -> Path | None:
+    if not value:
+        return None
+    string_value = str(value)
+    if not _is_explicit_path(string_value):
+        return None
+    candidate = Path(string_value).expanduser()
+    if candidate.exists():
+        return candidate.resolve()
+    return None
+
+
+def _command_executable_exists(command: list[str]) -> bool:
+    if not command:
+        return False
+    executable = str(command[0]).strip()
+    if not executable:
+        return False
+
+    resolved_path = _resolve_existing_path(executable)
+    if resolved_path is not None:
+        return True
+
+    return shutil.which(executable) is not None
+
+
+def _common_env_python_candidates(*env_names: str) -> list[Path]:
+    candidates: list[Path] = []
+    for env_name in env_names:
+        clean_name = str(env_name or "").strip()
+        if not clean_name:
+            continue
+        for root in CONDA_ENV_ROOT_CANDIDATES:
+            candidates.append(root / clean_name / "bin" / "python")
+            candidates.append(root / clean_name / "bin" / "python3")
+    return candidates
+
+
+def resolve_python_bin(
+    *,
+    env_var_name: str,
+    env_names: tuple[str, ...],
+    label: str,
+) -> Path:
+    configured = os.environ.get(env_var_name)
+    configured_path = _resolve_existing_path(configured)
+    if configured and configured_path is None:
+        raise FileNotFoundError(f"{label} python override {env_var_name} was set but not found: {configured}")
+    if configured_path is not None:
+        return configured_path
+
+    for candidate in _common_env_python_candidates(*env_names):
+        if candidate.exists():
+            return candidate.resolve()
+
+    raise FileNotFoundError(
+        f"Could not locate {label} python. Set {env_var_name} or install {label} in a standard env location."
+    )
+
+
+def resolve_vipe_command() -> list[str]:
+    override = os.environ.get("VIPE_CMD")
+    if override:
+        override_command = shlex.split(override)
+        if _command_executable_exists(override_command):
+            return override_command
+
+    configured_bin = os.environ.get("VIPE_BIN")
+    configured_bin_path = _resolve_existing_path(configured_bin)
+    if configured_bin and configured_bin_path is None:
+        raise FileNotFoundError(f"VIPE_BIN was set but not found: {configured_bin}")
+    if configured_bin_path is not None:
+        return [str(configured_bin_path)]
+
+    for root in CONDA_ENV_ROOT_CANDIDATES:
+        candidate = root / "vipe" / "bin" / "vipe"
+        if candidate.exists():
+            return [str(candidate.resolve())]
+
+    which_vipe = shutil.which("vipe")
+    if which_vipe:
+        return [which_vipe]
+
+    return [
+        str(
+            resolve_python_bin(
+                env_var_name="VIPE_PYTHON_BIN",
+                env_names=("vipe",),
+                label="ViPE",
+            )
+        ),
+        "-m",
+        "vipe",
+    ]
+
+
+def resolve_dynhamr_python_command() -> list[str]:
+    override = os.environ.get("DYNHAMR_PYTHON_CMD")
+    if override:
+        override_command = shlex.split(override)
+        if _command_executable_exists(override_command):
+            return override_command
+
+    python_bin = resolve_python_bin(
+        env_var_name="DYNHAMR_PYTHON_BIN",
+        env_names=("dynhamr", "dyn-hamr"),
+        label="Dyn-HaMR",
+    )
+    return [str(python_bin)]
+
+
+def run_command(command: list[str], *, cwd: Path, log_path: Path, env: dict[str, str]) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    started = datetime.now(timezone.utc).isoformat()
+    with log_path.open("a", encoding="utf-8") as log_handle:
+        log_handle.write(f"\n[{started}] $ {' '.join(shlex.quote(part) for part in command)}\n")
+        log_handle.flush()
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(cwd),
+                env=env,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            log_handle.write(f"\n[spawn error] {exc}\n")
+            raise RuntimeError(
+                f"Command executable was not found: {command[0]}. "
+                "Verify the ViPE/Dyn-HaMR runtime paths on the SaaS VM."
+            ) from exc
+        log_handle.write(f"\n[exit {completed.returncode}]\n")
+
+    if completed.returncode != 0:
+        tail = ""
+        try:
+            tail = "\n".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-80:])
+        except OSError:
+            tail = ""
+        raise RuntimeError(f"Command failed with exit {completed.returncode}: {' '.join(command)}\n{tail}")
+
+
+def collect_new_files(search_root: Path, seq: str, started_at: float, suffixes: tuple[str, ...]) -> list[Path]:
+    if not search_root.exists():
+        return []
+    suffix_set = {suffix.lower() for suffix in suffixes}
+    matching_files = sorted(
+        path for path in search_root.rglob("*") if path.is_file() and path.suffix.lower() in suffix_set
+    )
+    if not matching_files:
+        return []
+
+    recent = [path for path in matching_files if path.stat().st_mtime >= started_at - 60]
+    seq_lower = seq.lower()
+    seq_matches = [path for path in recent if seq_lower in path.as_posix().lower()]
+    if seq_matches:
+        return sorted(seq_matches)
+    if recent:
+        return sorted(recent)
+    return sorted(matching_files, key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def collect_new_obj_files(search_root: Path, seq: str, started_at: float) -> list[Path]:
+    return collect_new_files(search_root, seq, started_at, (".obj",))
+
+
+def collect_new_video_files(search_root: Path, seq: str, started_at: float) -> list[Path]:
+    return collect_new_files(search_root, seq, started_at, (".mp4", ".mov", ".m4v", ".webm"))
+
+
+def safe_output_name(path: Path, root: Path, index: int, used: set[str]) -> str:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        relative = Path(path.name)
+
+    suffix = relative.suffix or path.suffix or ""
+    if len(relative.parts) == 1:
+        candidate = relative.name
+    else:
+        stem = "__".join(re.sub(r"[^a-zA-Z0-9_.-]+", "_", part) for part in relative.with_suffix("").parts)
+        candidate = f"{stem}{suffix}"
+
+    default_name = f"artifact_{index:04d}{suffix}" if suffix else f"artifact_{index:04d}"
+    candidate = re.sub(r"[^a-zA-Z0-9_.-]+", "_", candidate).strip("._-") or default_name
+    if suffix and not candidate.lower().endswith(suffix.lower()):
+        candidate = f"{candidate}{suffix}"
+    elif not suffix and "." not in Path(candidate).name:
+        candidate = f"{candidate}.bin"
+    if candidate in used:
+        stem, extension = os.path.splitext(candidate)
+        candidate = f"{stem}_{index:04d}{extension}"
+    used.add(candidate)
+    return candidate
+
+
+def copy_artifacts(source_files: list[Path], output_dir: Path, collection_root: Path) -> list[dict[str, str]]:
+    copied: list[dict[str, str]] = []
+    used: set[str] = set()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for index, source_path in enumerate(source_files):
+        output_name = safe_output_name(source_path, collection_root, index, used)
+        target = output_dir / output_name
+        shutil.copy2(source_path, target)
+        copied.append(
+            {
+                "source": str(source_path),
+                "output": str(target),
+                "name": output_name,
+            }
+        )
+    return copied
+
+
+def copy_meshes(obj_files: list[Path], output_dir: Path, collection_root: Path) -> list[dict[str, str]]:
+    return copy_artifacts(obj_files, output_dir, collection_root)
+
+
+def write_manifest(output_dir: Path, file_name: str, payload: dict[str, Any]) -> Path:
+    manifest_path = output_dir / file_name
+    manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return manifest_path
