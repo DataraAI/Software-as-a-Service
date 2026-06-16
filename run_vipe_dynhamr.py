@@ -273,18 +273,23 @@ def main() -> None:
 
     log.info("Searching for outputs under: %s", dynhamr_output_root)
     log.info("Directory exists: %s", dynhamr_output_root.exists())
-    
-    # # List everything found to help diagnose
-    # if dynhamr_output_root.exists():
-    #     all_files = sorted(dynhamr_output_root.rglob("*"))
-    #     log.info("All files found (%d):", len(all_files))
-    #     for f in all_files:
-    #         log.info("  %s", f)
-    # else:
-    #     log.warning("Output root does not exist: %s", dynhamr_output_root)
         
     src_cam_videos = sorted(dynhamr_output_root.rglob(f"*_src_cam.mp4"))
     obj_files = sorted(dynhamr_output_root.rglob("smooth_fit/*/*.obj"))
+    npz_files = sorted(dynhamr_output_root.rglob("*_000000_joints_world.npz"))
+
+    if npz_files:
+        npz_file = npz_files[0]
+        mcap_out = npz_file.parent / f"{args.seq}.mcap"
+        run_in_conda(DYNHAMR_CONDA_ENV,
+            f"cd /home/ubuntu/Software-as-a-Service && python dynhamr_mcap_file_gen.py "
+            f"'{npz_file}' "
+            f"-o '{mcap_out}' "
+            f"--fps {fps}"
+        )
+        print(f"OUTPUT_MCAP: {mcap_out}")
+    else:
+        log.warning("No joints_world.npz found under %s", dynhamr_output_root)
 
     for video_file in src_cam_videos:
         print(f"OUTPUT_VIDEO: {video_file}")
