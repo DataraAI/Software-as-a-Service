@@ -278,6 +278,8 @@ def main() -> None:
     obj_files = sorted(dynhamr_output_root.rglob("smooth_fit/*/*.obj"))
     npz_files = sorted(dynhamr_output_root.rglob("*_000000_joints_world.npz"))
 
+    print(f"OUTPUT_NPZ: {npz_files[0]}")
+
     if npz_files:
         npz_file = npz_files[0]
         mcap_out = npz_file.parent / f"{args.seq}.mcap"
