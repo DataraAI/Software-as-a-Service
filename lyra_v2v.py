@@ -134,7 +134,7 @@ def main(argv=None):
     if not vipe_from_cache:
         _run(
             [
-                str(CONDA_BIN), "run", "-n", VIPE_CONDA_ENV,
+                str(CONDA_BIN), "run", "--no-capture-output", "-n", VIPE_CONDA_ENV,
                 "vipe", "infer", str(input_video),
                 "--output", str(vipe_output_dir),
                 "--pipeline", "lyra",
@@ -172,7 +172,7 @@ def main(argv=None):
         f"--trajectory {args.trajectory}"
     )
     _run(
-        [str(CONDA_BIN), "run", "-n", LYRA_CONDA_ENV, "bash", "-c", gen3c_bash_cmd],
+        [str(CONDA_BIN), "run", "--no-capture-output", "-n", LYRA_CONDA_ENV, "bash", "-c", gen3c_bash_cmd],
         label="Lyra Gen3C",
         cwd=LYRA_ROOT,
     )
