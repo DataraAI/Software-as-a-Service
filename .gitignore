@@ -22,6 +22,10 @@ Thumbs.db
 # Logs
 *.log
 
+# Worker secrets
+.env.worker*
+!.env.worker.example
+
 # IDE
 .vscode/
 .idea/
