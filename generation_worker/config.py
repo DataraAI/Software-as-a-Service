@@ -7,6 +7,11 @@ from urllib.parse import urlparse
 
 
 DAAS_INTERNAL_API_URL = os.getenv("DAAS_INTERNAL_API_URL", "http://localhost:5151").rstrip("/")
+ALLOW_INSECURE_DAAS_HTTP = os.getenv("ALLOW_INSECURE_DAAS_HTTP", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 GENERATION_WORKER_TOKEN = os.getenv("GENERATION_WORKER_TOKEN", "")
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "amqp://guest:guest@localhost:5672//")
 CELERY_QUEUE_NAME = os.getenv("CELERY_QUEUE_NAME", "lambda_jobs")
@@ -23,7 +28,11 @@ def validate_worker_config(
     parsed = urlparse(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("DAAS_INTERNAL_API_URL must be an absolute HTTP(S) URL")
-    if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+    if (
+        parsed.scheme != "https"
+        and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+        and not ALLOW_INSECURE_DAAS_HTTP
+    ):
         raise ValueError("DAAS_INTERNAL_API_URL must use HTTPS outside localhost")
     if not worker_token or worker_token.startswith("replace-with-"):
         raise ValueError("GENERATION_WORKER_TOKEN must be configured")
