@@ -1,0 +1,23 @@
+[Unit]
+Description=Datara SaaS Generation Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Software-as-a-Service
+EnvironmentFile=/home/ubuntu/Software-as-a-Service/.env.worker
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/home/ubuntu/miniconda3/envs/generation-worker/bin/python -c "from generation_worker.config import validate_worker_config; validate_worker_config()"
+ExecStart=/home/ubuntu/miniconda3/envs/generation-worker/bin/celery -A generation_worker.celery_app:celery_app worker --loglevel=INFO --concurrency=1 --prefetch-multiplier=1
+Restart=always
+RestartSec=10
+TimeoutStopSec=300
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
