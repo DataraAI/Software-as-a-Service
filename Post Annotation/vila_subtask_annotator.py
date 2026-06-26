@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 DEFAULT_PROMPT = """
-Describe the steps the individual takes in the video in chronological order.
+You are annotating a task video.
 
 Return ONLY valid JSON exactly in this schema:
 [
@@ -17,7 +17,7 @@ Return ONLY valid JSON exactly in this schema:
 
 Rules:
 - List the task-level steps in chronological order.
-- Use short conservative sub_task labels.
+- Use short conservative sub_task labels, 1-4 words.
 - Use lowercase labels.
 - Use integer frame numbers when they are clear.
 - If exact frame numbers are uncertain, use 0 for start_frame and end_frame.
@@ -28,7 +28,7 @@ Rules:
 MODEL_ID = os.getenv("VILA_MODEL_PATH") or "Efficient-Large-Model/VILA1.5-3b"
 DEFAULT_OUTPUT = os.path.join(os.path.expanduser("~"), "sub_task_annotations.json")
 DEFAULT_CONDA_ENV = os.getenv("VILA_CONDA_ENV") or "vila"
-DEFAULT_CONV_MODE = os.getenv("VILA_CONV_MODE") or "vicuna_v1"
+DEFAULT_CONV_MODE = os.getenv("VILA_CONV_MODE") or "auto"
 DEFAULT_VILA_INFER_BIN = os.getenv("VILA_INFER_BIN") or "vila-infer"
 JSON_VALUE_RE = re.compile(r"(\{.*\}|\[.*\])", re.DOTALL)
 
@@ -111,8 +111,12 @@ for conda_sh in "$HOME/miniconda3/etc/profile.d/conda.sh" "$HOME/anaconda3/etc/p
     fi
 done
 conda activate {shlex.quote(args.conda_env)}
-trap 'conda deactivate >/dev/null 2>&1 || true' EXIT
-{vila_command}
+export PYTHONUNBUFFERED=1
+export MPLBACKEND=Agg
+exit_code=0
+{vila_command} || exit_code=$?
+conda deactivate
+exit $exit_code
 """.strip()
 
 
