@@ -139,6 +139,28 @@ def download_video(url: str, seq: str) -> Path:
     return dest
 
 
+def download_and_extract_vipe_zip(url: str, vipe_output: Path) -> None:
+    import zipfile
+    vipe_output.mkdir(parents=True, exist_ok=True)
+    zip_path = vipe_output.parent / "vipe_cache_download.zip"
+    log.info("Downloading cached ViPE output from %s", url)
+    urllib.request.urlretrieve(url, zip_path)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(vipe_output)
+    zip_path.unlink(missing_ok=True)
+    log.info("Extracted cached ViPE output to %s", vipe_output)
+
+
+def zip_vipe_output(vipe_output: Path) -> Path:
+    import zipfile
+    zip_path = vipe_output.parent / f"{vipe_output.parent.name}_vipe_output.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for file_path in vipe_output.rglob("*"):
+            if file_path.is_file():
+                zf.write(file_path, file_path.relative_to(vipe_output))
+    return zip_path
+
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -156,7 +178,6 @@ def parse_args() -> argparse.Namespace:
         "--video-url",
         help="URL to download the input video from."
     )
-
     parser.add_argument(
         "--seq", required=True,
         help="Base name of the video file (no extension), used as data.seq."
@@ -173,6 +194,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--static", action="store_true", default=False,
         help="Pass this flag if the scene is static (sets is_static=True in DynHaMR)."
+    )
+    parser.add_argument(
+        "--vipe-zip-url",
+        help="URL to a cached ViPE output zip; if provided, ViPE inference is skipped."
     )
     return parser.parse_args()
 
@@ -224,15 +249,19 @@ def main() -> None:
     log.info("  Input  : %s", video_path)
     log.info("  Output : %s", vipe_output)
 
-    vipe_output.mkdir(parents=True, exist_ok=True)
-
-    vipe_start = time.time()
-    run_in_conda(
-        VIPE_CONDA_ENV,
-        f"vipe infer '{video_path}' --output '{vipe_output}' --pipeline {args.pipeline}",
-    )
-    vipe_elapsed = time.time() - vipe_start
-    log.info("ViPE inference complete. (%s)", fmt_duration(vipe_elapsed))
+    if args.vipe_zip_url:
+        download_and_extract_vipe_zip(args.vipe_zip_url, vipe_output)
+        vipe_elapsed = 0.0
+        log.info("Skipped ViPE inference — using cached output")
+    else:
+        vipe_output.mkdir(parents=True, exist_ok=True)
+        vipe_start = time.time()
+        run_in_conda(
+            VIPE_CONDA_ENV,
+            f"vipe infer '{video_path}' --output '{vipe_output}' --pipeline {args.pipeline}",
+        )
+        vipe_elapsed = time.time() - vipe_start
+        log.info("ViPE inference complete. (%s)", fmt_duration(vipe_elapsed))
 
     # --- Step 2: DynHaMR ---
     log.info("=== Step 2: Running DynHaMR ===")
@@ -278,10 +307,9 @@ def main() -> None:
     obj_files = sorted(dynhamr_output_root.rglob("smooth_fit/*/*.obj"))
     npz_files = sorted(dynhamr_output_root.rglob("*_000000_joints_world.npz"))
 
-    print(f"OUTPUT_NPZ: {npz_files[0]}")
-
     if npz_files:
         npz_file = npz_files[0]
+        print(f"OUTPUT_NPZ: {npz_file}")
         mcap_out = npz_file.parent / f"{args.seq}.mcap"
         run_in_conda(DYNHAMR_CONDA_ENV,
             f"cd /home/ubuntu/Software-as-a-Service && python dynhamr_mcap_file_gen.py "
@@ -298,6 +326,10 @@ def main() -> None:
 
     if obj_files:
         print(f"OUTPUT_OBJ: {obj_files[0].parent}")
+
+    if not args.vipe_zip_url:
+        vipe_zip_path = zip_vipe_output(vipe_output)
+        print(f"OUTPUT_VIPE_ZIP: {vipe_zip_path}")
         
 
 if __name__ == "__main__":
