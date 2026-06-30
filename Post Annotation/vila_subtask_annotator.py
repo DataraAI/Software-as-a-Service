@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 DEFAULT_PROMPT = """
-You are annotating a task video.
+You are annotating a task video, your job is to describe the main steps taken to accomplish the task in chronological order.
 
 Return ONLY valid JSON exactly in this schema:
 [
@@ -16,7 +16,7 @@ Return ONLY valid JSON exactly in this schema:
 ]
 
 Rules:
-- List the task-level steps in chronological order.
+- List the steps taken to complete the task in chronological order.
 - Use short conservative sub_task labels, 1-4 words.
 - Use lowercase labels.
 - Use integer frame numbers when they are clear.
