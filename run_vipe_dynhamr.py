@@ -342,9 +342,9 @@ def main() -> None:
     log.info("DynHaMR run output directory: %s", run_output_dir)
     
     # Search only within this run's output directory
-    src_cam_videos = sorted(dynhamr_output_root.rglob(f"*_src_cam.mp4"))
-    obj_files = sorted(dynhamr_output_root.rglob("smooth_fit/*/*.obj"))
-    npz_files = sorted(dynhamr_output_root.rglob("*_000000_joints_world.npz"))
+    src_cam_videos = sorted(run_output_dir.rglob(f"*_src_cam.mp4"))
+    obj_files = sorted(run_output_dir.rglob("smooth_fit/*/*.obj"))
+    npz_files = sorted(run_output_dir.rglob("*_000000_joints_world.npz"))
 
     # --- Emit OUTPUT_RUN_DIR first so the caller can always clean up ---
     print(f"OUTPUT_RUN_DIR: {run_output_dir}")
@@ -362,7 +362,7 @@ def main() -> None:
         )
         print(f"OUTPUT_MCAP: {mcap_out}")
     else:
-        log.warning("No joints_world.npz found under %s", dynhamr_output_root)
+        log.warning("No joints_world.npz found under %s", run_output_dir)
 
     # --- Videos ---
     for video_file in src_cam_videos:
