@@ -8,21 +8,25 @@ from pathlib import Path
 
 
 DEFAULT_PROMPT = """
-You are annotating a task video, your job is to describe the main steps taken to accomplish the task in chronological order.
+Please follow the below JSON format to describe the chronological steps the individual(s) are taking to complete the task in the video:
 
-Return ONLY valid JSON exactly in this schema:
-[
-  {"sub_task":"short_label","start_frame":0,"end_frame":0}
-]
-
-Rules:
-- List the steps taken to complete the task in chronological order.
-- Use short conservative sub_task labels, 1-4 words.
-- Use lowercase labels.
-- Use integer frame numbers when they are clear.
-- If exact frame numbers are uncertain, use 0 for start_frame and end_frame.
-- Do not include explanations, markdown, or extra keys.
-- If the video is ambiguous, return [{"sub_task":"unknown","start_frame":0,"end_frame":0}].
+{
+  "tasks": [
+    {
+      "task_name": "<Task>",
+      "description": "<Description of the task>",
+      "subtasks": [
+        {
+          "subtask_name": "<Subtask>",
+          "start_frame": <Start frame number>,
+          "end_frame": <End frame number>,
+          "description": "<Description of the subtask>"
+        },
+        ...
+      ]
+    }
+  ]
+}
 """.strip()
 
 MODEL_ID = os.getenv("VILA_MODEL_PATH") or "Efficient-Large-Model/VILA1.5-3b"
@@ -185,15 +189,32 @@ def first_present(mapping, keys):
     return None
 
 
-def normalize_segments(payload):
+def extract_segment_items(payload):
     if isinstance(payload, dict):
         if isinstance(payload.get("subtasks"), list):
-            payload = payload["subtasks"]
-        elif isinstance(payload.get("steps"), list):
-            payload = payload["steps"]
-        else:
-            payload = [payload]
+            return extract_segment_items(payload["subtasks"])
+        if isinstance(payload.get("steps"), list):
+            return extract_segment_items(payload["steps"])
+        if isinstance(payload.get("tasks"), list):
+            return extract_segment_items(payload["tasks"])
+        return [payload]
 
+    if isinstance(payload, list):
+        items = []
+        for item in payload:
+            if isinstance(item, dict) and any(
+                isinstance(item.get(key), list) for key in ("subtasks", "steps", "tasks")
+            ):
+                items.extend(extract_segment_items(item))
+            else:
+                items.append(item)
+        return items
+
+    return payload
+
+
+def normalize_segments(payload):
+    payload = extract_segment_items(payload)
     if not isinstance(payload, list):
         payload = [{"sub_task": "unknown", "start_frame": 0, "end_frame": 0}]
 

@@ -18,6 +18,7 @@ SAAS_CORNER_PYTHON_BIN = os.getenv("SAAS_CORNER_PYTHON_BIN", str(HOME / "minicon
 SAAS_SEGMENTATION_PYTHON_BIN = os.getenv("SAAS_PYTHON_BIN", str(HOME / "miniconda3" / "envs" / "sam3" / "bin" / "python"))
 SAAS_ROSE_PYTHON_BIN = os.getenv("SAAS_ROSE_PYTHON_BIN", str(HOME / "miniconda3" / "envs" / "rose_runtime" / "bin" / "python"))
 SAAS_VIPE_PYTHON_BIN = os.getenv("SAAS_VIPE_PYTHON_BIN", str(HOME / "miniconda3" / "envs" / "vipe" / "bin" / "python"))
+SAAS_TASK_INTELLIGENCE_PYTHON_BIN = os.getenv("SAAS_TASK_INTELLIGENCE_PYTHON_BIN", sys.executable)
 SAAS_RUNNER_PYTHON_BIN = os.getenv("SAAS_RUNNER_PYTHON_BIN", sys.executable)
 
 
@@ -242,10 +243,10 @@ def handle_generate_hand_mesh(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_generate_task_intelligence(request: dict[str, Any]) -> dict[str, Any]:
-    script = _require_file(REPO_ROOT / "Post Annotation" / "qwen_subtask_annotator.py")
+    script = _require_file(REPO_ROOT / "Post Annotation" / "vila_subtask_annotator.py")
     return _run_and_parse_path(
         [
-            SAAS_VLM_PYTHON_BIN,
+            SAAS_TASK_INTELLIGENCE_PYTHON_BIN,
             str(script),
             "--asset_path",
             str(request["video_url"]),
