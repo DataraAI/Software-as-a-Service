@@ -7,34 +7,34 @@ import subprocess
 from pathlib import Path
 
 
-DEFAULT_PROMPT = """
-Please follow the below JSON format to describe the chronological steps the individual(s) are taking to complete the task in the video:
+DEFAULT_PROMPT = (
+    "Describe the task and the chronological steps the individual takes to complete it."
+)
 
-{
-  "tasks": [
-    {
-      "task_name": "<Task>",
-      "description": "<Description of the task>",
-      "subtasks": [
-        {
-          "subtask_name": "<Subtask>",
-          "start_frame": <Start frame number>,
-          "end_frame": <End frame number>,
-          "description": "<Description of the subtask>"
-        },
-        ...
-      ]
-    }
-  ]
-}
-""".strip()
-
-MODEL_ID = os.getenv("VILA_MODEL_PATH") or "Efficient-Large-Model/VILA1.5-3b"
-DEFAULT_OUTPUT = os.path.join(os.path.expanduser("~"), "sub_task_annotations.json")
+MODEL_ID = os.getenv("VILA_MODEL_PATH") or "Efficient-Large-Model/NVILA-8B"
+DEFAULT_OUTPUT = "sub_task_annotations.json"
 DEFAULT_CONDA_ENV = os.getenv("VILA_CONDA_ENV") or "vila"
 DEFAULT_CONV_MODE = os.getenv("VILA_CONV_MODE") or "auto"
 DEFAULT_VILA_INFER_BIN = os.getenv("VILA_INFER_BIN") or "vila-infer"
 JSON_VALUE_RE = re.compile(r"(\{.*\}|\[.*\])", re.DOTALL)
+FRAME_RANGE_RE = re.compile(
+    r"(?:frames?|frame\s*range)\s*[:#]?\s*(\d+)\s*(?:-|to|through|\u2013|\u2014)\s*(\d+)",
+    re.IGNORECASE,
+)
+START_END_FRAME_RE = re.compile(
+    r"(?:start\s*frame|startFrame|start)\D{0,20}(\d+).*?"
+    r"(?:end\s*frame|endFrame|end)\D{0,20}(\d+)",
+    re.IGNORECASE,
+)
+BRACKET_FRAME_RANGE_RE = re.compile(
+    r"\[\s*(\d+)\s*(?:-|to|through|\u2013|\u2014)\s*(\d+)\s*\]",
+    re.IGNORECASE,
+)
+STEP_LINE_RE = re.compile(
+    r"^\s*(?:[-*\u2022]\s+|\d+[.)]\s+|(?:step|subtask|task)\s*\d+\s*[:.)-]\s*)(.+)$",
+    re.IGNORECASE,
+)
+MODEL_PREFIX_RE = re.compile(r"^\s*(?:assistant|vila|output|answer)\s*:\s*", re.IGNORECASE)
 
 
 def parse_args():
@@ -56,6 +56,12 @@ def parse_args():
         type=str,
         help="output JSON path",
         default=DEFAULT_OUTPUT,
+    )
+    parser.add_argument(
+        "--raw_output",
+        type=str,
+        help="optional path for raw vila-infer stdout",
+        default="",
     )
     parser.add_argument(
         "--model_path",
@@ -142,7 +148,7 @@ def run_vila_infer(args, prompt):
 
 def parse_first_json_value(output_text):
     if not output_text:
-        return [{"sub_task": "unknown", "start_frame": 0, "end_frame": 0}]
+        return None
 
     decoder = json.JSONDecoder()
     parsed_values = []
@@ -165,14 +171,14 @@ def parse_first_json_value(output_text):
         except json.JSONDecodeError:
             pass
 
-    return [{"sub_task": "unknown", "start_frame": 0, "end_frame": 0}]
+    return None
 
 
-def normalize_sub_task(value):
+def normalize_description(value, default="unknown"):
     if not isinstance(value, str):
-        return "unknown"
-    value = re.sub(r"\s+", " ", value.strip().lower())
-    return value or "unknown"
+        return default
+    value = re.sub(r"\s+", " ", value.strip())
+    return value or default
 
 
 def normalize_frame(value):
@@ -183,27 +189,65 @@ def normalize_frame(value):
 
 
 def first_present(mapping, keys):
+    normalized = {str(key).lower(): value for key, value in mapping.items()}
     for key in keys:
         if key in mapping:
             return mapping[key]
+        normalized_key = str(key).lower()
+        if normalized_key in normalized:
+            return normalized[normalized_key]
     return None
+
+
+def clean_output_text(output_text):
+    text = output_text or ""
+    text = re.sub(r"```(?:json)?", "", text, flags=re.IGNORECASE)
+    text = text.replace("```", "")
+    lines = []
+    for line in text.splitlines():
+        stripped = MODEL_PREFIX_RE.sub("", line.strip())
+        if stripped:
+            lines.append(stripped)
+    return "\n".join(lines).strip()
+
+
+def parse_frame_range(text):
+    if not isinstance(text, str):
+        return 0, 0
+    for pattern in (START_END_FRAME_RE, FRAME_RANGE_RE, BRACKET_FRAME_RANGE_RE):
+        match = pattern.search(text)
+        if match:
+            start_frame = normalize_frame(match.group(1))
+            end_frame = normalize_frame(match.group(2))
+            return start_frame, max(start_frame, end_frame)
+    return 0, 0
+
+
+def strip_frame_markers(text):
+    if not isinstance(text, str):
+        return ""
+    text = START_END_FRAME_RE.sub("", text)
+    text = FRAME_RANGE_RE.sub("", text)
+    text = BRACKET_FRAME_RANGE_RE.sub("", text)
+    text = re.sub(r"\s*[:;-]\s*$", "", text.strip())
+    text = re.sub(r"^\s*[:;-]\s*", "", text)
+    return normalize_description(text)
 
 
 def extract_segment_items(payload):
     if isinstance(payload, dict):
-        if isinstance(payload.get("subtasks"), list):
-            return extract_segment_items(payload["subtasks"])
-        if isinstance(payload.get("steps"), list):
-            return extract_segment_items(payload["steps"])
-        if isinstance(payload.get("tasks"), list):
-            return extract_segment_items(payload["tasks"])
+        for key in ("subTasks", "subtasks", "steps", "actions", "segments", "tasks"):
+            value = first_present(payload, (key,))
+            if isinstance(value, list):
+                return extract_segment_items(value)
         return [payload]
 
     if isinstance(payload, list):
         items = []
         for item in payload:
             if isinstance(item, dict) and any(
-                isinstance(item.get(key), list) for key in ("subtasks", "steps", "tasks")
+                isinstance(first_present(item, (key,)), list)
+                for key in ("subTasks", "subtasks", "steps", "actions", "segments", "tasks")
             ):
                 items.extend(extract_segment_items(item))
             else:
@@ -213,52 +257,174 @@ def extract_segment_items(payload):
     return payload
 
 
-def normalize_segments(payload):
+def extract_task_description(payload, raw_output):
+    if isinstance(payload, dict):
+        value = first_present(
+            payload,
+            (
+                "taskDescription",
+                "task_description",
+                "taskName",
+                "task_name",
+                "description",
+                "summary",
+            ),
+        )
+        if isinstance(value, str) and value.strip():
+            return normalize_description(value)
+
+        tasks = first_present(payload, ("tasks",))
+        if isinstance(tasks, list) and tasks:
+            descriptions = [
+                extract_task_description(task, "")
+                for task in tasks
+                if isinstance(task, dict)
+            ]
+            descriptions = [description for description in descriptions if description != "unknown"]
+            if descriptions:
+                return normalize_description(" ".join(descriptions))
+
+    if isinstance(payload, list):
+        descriptions = [
+            extract_task_description(item, "")
+            for item in payload
+            if isinstance(item, dict)
+        ]
+        descriptions = [description for description in descriptions if description != "unknown"]
+        if descriptions:
+            return normalize_description(" ".join(descriptions))
+
+    return normalize_description(clean_output_text(raw_output))
+
+
+def sentence_tokenize(text):
+    try:
+        import nltk
+
+        try:
+            return nltk.sent_tokenize(text)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    return [sentence.strip() for sentence in sentences if sentence.strip()]
+
+
+def split_text_subtasks(output_text):
+    text = clean_output_text(output_text)
+    if not text:
+        return "unknown", ["unknown"]
+
+    intro_lines = []
+    step_lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        match = STEP_LINE_RE.match(stripped)
+        if match:
+            step_lines.append(match.group(1).strip())
+        elif step_lines:
+            step_lines[-1] = f"{step_lines[-1]} {stripped}"
+        else:
+            intro_lines.append(stripped)
+
+    if step_lines:
+        task_description = normalize_description(" ".join(intro_lines), normalize_description(text))
+        return task_description, step_lines
+
+    sentences = sentence_tokenize(text)
+    if len(sentences) > 1:
+        return normalize_description(text), sentences
+    return normalize_description(text), [text]
+
+
+def normalize_segments(payload, raw_output):
     payload = extract_segment_items(payload)
     if not isinstance(payload, list):
-        payload = [{"sub_task": "unknown", "start_frame": 0, "end_frame": 0}]
+        payload = []
 
     segments = []
     for item in payload:
         if isinstance(item, str):
+            start_frame, end_frame = parse_frame_range(item)
             segment = {
-                "sub_task": normalize_sub_task(item),
-                "start_frame": 0,
-                "end_frame": 0,
+                "startFrame": start_frame,
+                "endFrame": end_frame,
+                "subTaskDescription": strip_frame_markers(item),
             }
         elif isinstance(item, dict):
             label = (
-                item.get("sub_task")
-                or item.get("subtask")
-                or item.get("subtask_name")
-                or item.get("step")
-                or item.get("action")
-                or item.get("description")
+                first_present(
+                    item,
+                    (
+                        "subTaskDescription",
+                        "sub_task_description",
+                        "sub_task",
+                        "subtask",
+                        "subtask_name",
+                        "step",
+                        "action",
+                        "description",
+                        "taskDescription",
+                        "task_name",
+                    ),
+                )
                 or "unknown"
             )
             start_frame = normalize_frame(
-                first_present(item, ("start_frame", "frame_start", "start", "startFrame"))
+                first_present(item, ("startFrame", "start_frame", "frame_start", "start"))
             )
             end_frame = normalize_frame(
-                first_present(item, ("end_frame", "frame_end", "end", "endFrame"))
+                first_present(item, ("endFrame", "end_frame", "frame_end", "end"))
             )
+            if not start_frame and not end_frame:
+                start_frame, end_frame = parse_frame_range(label)
             segment = {
-                "sub_task": normalize_sub_task(label),
-                "start_frame": start_frame,
-                "end_frame": max(start_frame, end_frame),
+                "startFrame": start_frame,
+                "endFrame": max(start_frame, end_frame),
+                "subTaskDescription": strip_frame_markers(label),
             }
         else:
             continue
         segments.append(segment)
 
-    return segments or [{"sub_task": "unknown", "start_frame": 0, "end_frame": 0}]
+    if segments:
+        return segments
+
+    _, step_texts = split_text_subtasks(raw_output)
+    for step_text in step_texts:
+        start_frame, end_frame = parse_frame_range(step_text)
+        segments.append(
+            {
+                "startFrame": start_frame,
+                "endFrame": end_frame,
+                "subTaskDescription": strip_frame_markers(step_text),
+            }
+        )
+    return segments or [{"startFrame": 0, "endFrame": 0, "subTaskDescription": "unknown"}]
 
 
-def write_output(segments, output_json):
+def normalize_annotation(raw_output):
+    payload = parse_first_json_value(raw_output)
+    if payload is None:
+        task_description, _ = split_text_subtasks(raw_output)
+    else:
+        task_description = extract_task_description(payload, raw_output)
+
+    return {
+        "taskDescription": task_description,
+        "subTasks": normalize_segments(payload, raw_output),
+    }
+
+
+def write_output(annotation, output_json):
     output_path = normalize_output_path(output_json)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as handle:
-        json.dump(segments, handle, indent=2)
+        json.dump(annotation, handle, indent=2)
     return output_path
 
 
@@ -266,9 +432,16 @@ def main():
     args = parse_args()
     prompt = build_prompt(args.prompt)
     raw_output = run_vila_infer(args, prompt)
-    payload = parse_first_json_value(raw_output)
-    segments = normalize_segments(payload)
-    output_path = write_output(segments, args.output_json)
+    if args.raw_output:
+        raw_output_path = os.path.abspath(os.path.expanduser(args.raw_output))
+        Path(raw_output_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(raw_output_path, "w", encoding="utf-8") as handle:
+            handle.write(raw_output)
+            if raw_output and not raw_output.endswith("\n"):
+                handle.write("\n")
+
+    annotation = normalize_annotation(raw_output)
+    output_path = write_output(annotation, args.output_json)
     print(output_path)
 
 
