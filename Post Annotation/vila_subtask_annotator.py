@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 DEFAULT_PROMPT = (
-    "Describe the task and the chronological steps the individual takes to complete it."
+    "Describe the overall task and the chronological steps (subTasks) the individual takes to complete it."
 )
 
 MODEL_ID = os.getenv("VILA_MODEL_PATH") or "Efficient-Large-Model/NVILA-8B"
