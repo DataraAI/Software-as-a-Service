@@ -11,7 +11,7 @@ USAGE:
         --static   <store_true flag, omit for False>
         [--fps     <override auto-detected FPS>]
         [--video-url    <URL to download video from>]
-        [--vipe-zip-url <URL to cached ViPE output zip; skips ViPE inference>]
+        [--vipe-zip-url <URL to blob ViPE output zip; skips ViPE inference>]
 
 EXAMPLE:
     python run_vipe_dynhamr.py \
@@ -26,7 +26,7 @@ NOTES:
       (data_root is auto-derived from the --video path as two levels up).
     - Conda environments required: "vipe" (ViPE) and "dynhamr" (DynHaMR).
     - If --vipe-zip-url is provided, ViPE inference is skipped entirely and the
-      cached zip is downloaded and extracted instead.
+      blob zip is downloaded and extracted instead.
 """
 
 import argparse
@@ -145,17 +145,17 @@ def download_video(url: str, seq: str) -> Path:
 
 def download_and_extract_vipe_zip(url: str, vipe_output: Path) -> None:
     """
-    Download a cached ViPE output zip from a URL and extract it into vipe_output.
+    Download a blob ViPE output zip from a URL and extract it into vipe_output.
     """
     import zipfile
     vipe_output.mkdir(parents=True, exist_ok=True)
-    zip_path = vipe_output.parent / "vipe_cache_download.zip"
-    log.info("Downloading cached ViPE output from %s", url)
+    zip_path = vipe_output.parent / "vipe_blob_download.zip"
+    log.info("Downloading blob ViPE output from %s", url)
     urllib.request.urlretrieve(url, zip_path)
     with zipfile.ZipFile(zip_path, "r") as zf:
         zf.extractall(vipe_output)
     zip_path.unlink(missing_ok=True)
-    log.info("Extracted cached ViPE output to %s", vipe_output)
+    log.info("Extracted blob ViPE output to %s", vipe_output)
 
 
 def zip_vipe_output(vipe_output: Path) -> Path:
@@ -234,7 +234,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--vipe-zip-url",
-        help="URL to a cached ViPE output zip; if provided, ViPE inference is skipped."
+        help="URL to a blob ViPE output zip; if provided, ViPE inference is skipped."
     )
     return parser.parse_args()
 
@@ -281,14 +281,14 @@ def main() -> None:
     if args.fps is not None:
         log.info("FPS manually set to %s (skipping auto-detection)", fps)
 
-    # --- Step 1: ViPE (or restore from cache) ---
+    # --- Step 1: ViPE (or restore from blob) ---
     vipe_elapsed = 0.0
     if args.vipe_zip_url:
-        log.info("=== Step 1: Restoring ViPE output from cache ===")
-        log.info("  Cache URL : %s", args.vipe_zip_url)
+        log.info("=== Step 1: Restoring ViPE output from blob ===")
+        log.info("  Blob URL : %s", args.vipe_zip_url)
         log.info("  Output    : %s", vipe_output)
         download_and_extract_vipe_zip(args.vipe_zip_url, vipe_output)
-        log.info("ViPE cache restored — inference skipped.")
+        log.info("ViPE blob restored — inference skipped.")
     else:
         log.info("=== Step 1: Running ViPE (pipeline: %s) ===", args.pipeline)
         log.info("  Input  : %s", video_path)
@@ -372,7 +372,7 @@ def main() -> None:
     if obj_files:
         print(f"OUTPUT_OBJ: {obj_files[0].parent}")
 
-    # --- ViPE zip (only when freshly computed, not when restored from cache) ---
+    # --- ViPE zip (only when freshly computed, not when restored from blob) ---
     if not args.vipe_zip_url:
         vipe_zip_path = zip_vipe_output(vipe_output)
         print(f"OUTPUT_VIPE_ZIP: {vipe_zip_path}")
