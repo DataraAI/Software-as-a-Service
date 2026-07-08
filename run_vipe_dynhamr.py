@@ -10,7 +10,8 @@ USAGE:
         --pipeline <vipe pipeline: default | lyra  (default: default)> \
         --static   <store_true flag, omit for False>
         [--fps     <override auto-detected FPS>]
-        [--video-url <URL to download video from>]
+        [--video-url    <URL to download video from>]
+        [--vipe-zip-url <URL to blob ViPE output zip; skips ViPE inference>]
 
 EXAMPLE:
     python run_vipe_dynhamr.py \
@@ -24,9 +25,12 @@ NOTES:
     - The video file must live under <data_root>/videos/<seq>.mp4
       (data_root is auto-derived from the --video path as two levels up).
     - Conda environments required: "vipe" (ViPE) and "dynhamr" (DynHaMR).
+    - If --vipe-zip-url is provided, ViPE inference is skipped entirely and the
+      blob zip is downloaded and extracted instead.
 """
 
 import argparse
+import datetime
 import time
 import logging
 import subprocess
@@ -139,6 +143,61 @@ def download_video(url: str, seq: str) -> Path:
     return dest
 
 
+def download_and_extract_vipe_zip(url: str, vipe_output: Path) -> None:
+    """
+    Download a blob ViPE output zip from a URL and extract it into vipe_output.
+    """
+    import zipfile
+    vipe_output.mkdir(parents=True, exist_ok=True)
+    zip_path = vipe_output.parent / "vipe_blob_download.zip"
+    log.info("Downloading blob ViPE output from %s", url)
+    urllib.request.urlretrieve(url, zip_path)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(vipe_output)
+    zip_path.unlink(missing_ok=True)
+    log.info("Extracted blob ViPE output to %s", vipe_output)
+
+
+def zip_vipe_output(vipe_output: Path) -> Path:
+    """
+    Zip the ViPE output directory for caching.
+    Returns the path to the created zip file.
+    """
+    import zipfile
+    zip_path = vipe_output.parent / f"{vipe_output.parent.name}_vipe_output.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for file_path in vipe_output.rglob("*"):
+            if file_path.is_file():
+                zf.write(file_path, file_path.relative_to(vipe_output))
+    return zip_path
+
+def resolve_dynhamr_output_dir(dynhamr_output_root: Path, seq: str) -> Path:
+    """
+    DynHaMR writes to: output/logs/video-custom/{YYYY-MM-DD}/{seq}-*/
+    Resolve the exact directory created for this run by looking for a
+    newly created subdirectory matching today's date and the sequence name.
+    Raises RuntimeError if not found or ambiguous.
+    """
+    today = datetime.date.today().isoformat()  # YYYY-MM-DD
+    date_dir = dynhamr_output_root / today
+    if not date_dir.exists():
+        raise RuntimeError(f"DynHaMR output date directory not found: {date_dir}")
+
+    matches = sorted(
+        [p for p in date_dir.iterdir() if p.is_dir() and p.name.startswith(f"{seq}-")],
+        key=lambda p: p.stat().st_mtime,
+    )
+    if not matches:
+        raise RuntimeError(
+            f"No DynHaMR output directory found for seq '{seq}' under {date_dir}"
+        )
+    if len(matches) > 1:
+        log.warning(
+            "Multiple DynHaMR output dirs found for seq '%s' under %s: %s — "
+            "using most recent: %s",
+            seq, date_dir, [str(m) for m in matches], matches[-1],
+        )
+    return matches[-1]
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -156,7 +215,6 @@ def parse_args() -> argparse.Namespace:
         "--video-url",
         help="URL to download the input video from."
     )
-
     parser.add_argument(
         "--seq", required=True,
         help="Base name of the video file (no extension), used as data.seq."
@@ -166,13 +224,17 @@ def parse_args() -> argparse.Namespace:
         help="Override auto-detected FPS (optional)."
     )
     parser.add_argument(
-        "--pipeline", choices=["default", "lyra"], default="default",
-        help="ViPE pipeline to use (default: 'default'). "
+        "--pipeline", choices=["default", "lyra"], default="lyra",
+        help="ViPE pipeline to use (default: 'lyra'). "
              "Use 'lyra' for the RoboEyeView/Lyra pipeline."
     )
     parser.add_argument(
         "--static", action="store_true", default=False,
         help="Pass this flag if the scene is static (sets is_static=True in DynHaMR)."
+    )
+    parser.add_argument(
+        "--vipe-zip-url",
+        help="URL to a blob ViPE output zip; if provided, ViPE inference is skipped."
     )
     return parser.parse_args()
 
@@ -219,20 +281,26 @@ def main() -> None:
     if args.fps is not None:
         log.info("FPS manually set to %s (skipping auto-detection)", fps)
 
-    # --- Step 1: ViPE ---
-    log.info("=== Step 1: Running ViPE (pipeline: %s) ===", args.pipeline)
-    log.info("  Input  : %s", video_path)
-    log.info("  Output : %s", vipe_output)
-
-    vipe_output.mkdir(parents=True, exist_ok=True)
-
-    vipe_start = time.time()
-    run_in_conda(
-        VIPE_CONDA_ENV,
-        f"vipe infer '{video_path}' --output '{vipe_output}' --pipeline {args.pipeline}",
-    )
-    vipe_elapsed = time.time() - vipe_start
-    log.info("ViPE inference complete. (%s)", fmt_duration(vipe_elapsed))
+    # --- Step 1: ViPE (or restore from blob) ---
+    vipe_elapsed = 0.0
+    if args.vipe_zip_url:
+        log.info("=== Step 1: Restoring ViPE output from blob ===")
+        log.info("  Blob URL : %s", args.vipe_zip_url)
+        log.info("  Output    : %s", vipe_output)
+        download_and_extract_vipe_zip(args.vipe_zip_url, vipe_output)
+        log.info("ViPE blob restored — inference skipped.")
+    else:
+        log.info("=== Step 1: Running ViPE (pipeline: %s) ===", args.pipeline)
+        log.info("  Input  : %s", video_path)
+        log.info("  Output : %s", vipe_output)
+        vipe_output.mkdir(parents=True, exist_ok=True)
+        vipe_start = time.time()
+        run_in_conda(
+            VIPE_CONDA_ENV,
+            f"vipe infer '{video_path}' --output '{vipe_output}' --pipeline {args.pipeline}",
+        )
+        vipe_elapsed = time.time() - vipe_start
+        log.info("ViPE inference complete. (%s)", fmt_duration(vipe_elapsed))
 
     # --- Step 2: DynHaMR ---
     log.info("=== Step 2: Running DynHaMR ===")
@@ -265,23 +333,26 @@ def main() -> None:
     log.info("  DynHaMR   : %s", fmt_duration(dynhamr_elapsed))
     log.info("  Total     : %s", fmt_duration(total))
 
-    # --- Emit output sentinels for the caller to parse ---
-    # DynHaMR writes results under: <dynhamr_dir>/output/logs/video-custom/<date>/<seq>-*/
-    # We search for the _src_cam video and all .obj files and print their paths
-    # so call_lambda_vm.py doesn't need to do any directory discovery itself.
-    dynhamr_output_root = Path(DYNHAMR_DIR) / ".." / "output" / "logs" / "video-custom"
+    # --- Locate DynHaMR output directory ---
+    # Scoped to today's date and this seq to avoid picking up stale runs.
+    dynhamr_output_root = (Path(DYNHAMR_DIR) / ".." / "output" / "logs" / "video-custom").resolve()
+    log.info("Locating run output directory under: %s", dynhamr_output_root)
+ 
+    run_output_dir = resolve_dynhamr_output_dir(dynhamr_output_root, args.seq)
+    log.info("DynHaMR run output directory: %s", run_output_dir)
+    
+    # Search only within this run's output directory
+    src_cam_videos = sorted(run_output_dir.rglob(f"*_src_cam.mp4"))
+    obj_files = sorted(run_output_dir.rglob("smooth_fit/*/*.obj"))
+    npz_files = sorted(run_output_dir.rglob("*_000000_joints_world.npz"))
 
-    log.info("Searching for outputs under: %s", dynhamr_output_root)
-    log.info("Directory exists: %s", dynhamr_output_root.exists())
-        
-    src_cam_videos = sorted(dynhamr_output_root.rglob(f"*_src_cam.mp4"))
-    obj_files = sorted(dynhamr_output_root.rglob("smooth_fit/*/*.obj"))
-    npz_files = sorted(dynhamr_output_root.rglob("*_000000_joints_world.npz"))
+    # --- Emit OUTPUT_RUN_DIR first so the caller can always clean up ---
+    print(f"OUTPUT_RUN_DIR: {run_output_dir}")
 
-    print(f"OUTPUT_NPZ: {npz_files[0]}")
-
+    # --- NPZ + MCAP ---
     if npz_files:
         npz_file = npz_files[0]
+        print(f"OUTPUT_NPZ: {npz_file}")
         mcap_out = npz_file.parent / f"{args.seq}.mcap"
         run_in_conda(DYNHAMR_CONDA_ENV,
             f"cd /home/ubuntu/Software-as-a-Service && python dynhamr_mcap_file_gen.py "
@@ -291,13 +362,20 @@ def main() -> None:
         )
         print(f"OUTPUT_MCAP: {mcap_out}")
     else:
-        log.warning("No joints_world.npz found under %s", dynhamr_output_root)
+        log.warning("No joints_world.npz found under %s", run_output_dir)
 
+    # --- Videos ---
     for video_file in src_cam_videos:
         print(f"OUTPUT_VIDEO: {video_file}")
 
+    # --- OBJ directory ---
     if obj_files:
         print(f"OUTPUT_OBJ: {obj_files[0].parent}")
+
+    # --- ViPE zip (only when freshly computed, not when restored from blob) ---
+    if not args.vipe_zip_url:
+        vipe_zip_path = zip_vipe_output(vipe_output)
+        print(f"OUTPUT_VIPE_ZIP: {vipe_zip_path}")
         
 
 if __name__ == "__main__":
