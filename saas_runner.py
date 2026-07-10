@@ -17,7 +17,7 @@ SAAS_VLM_PYTHON_BIN = os.getenv("SAAS_VLM_PYTHON_BIN", str(HOME / "miniconda3" /
 SAAS_CORNER_PYTHON_BIN = os.getenv("SAAS_CORNER_PYTHON_BIN", str(HOME / "miniconda3" / "envs" / "addit-sam2" / "bin" / "python"))
 SAAS_SEGMENTATION_PYTHON_BIN = os.getenv("SAAS_PYTHON_BIN", str(HOME / "miniconda3" / "envs" / "sam3" / "bin" / "python"))
 SAAS_ROSE_PYTHON_BIN = os.getenv("SAAS_ROSE_PYTHON_BIN", str(HOME / "miniconda3" / "envs" / "rose_runtime" / "bin" / "python"))
-SAAS_ERASERDIT_PYTHON_BIN = os.getenv("SAAS_ERASERDIT_PYTHON_BIN", str(HOME / "miniconda3" / "envs" / "eraserdit" / "bin" / "python"))
+SAAS_ERASERDIT_PYTHON_BIN = os.getenv("SAAS_ERASERDIT_PYTHON_BIN", str(HOME / "miniconda3" / "envs" / "EraserDiT" / "bin" / "python"))
 SAAS_VIPE_PYTHON_BIN = os.getenv("SAAS_VIPE_PYTHON_BIN", str(HOME / "miniconda3" / "envs" / "vipe" / "bin" / "python"))
 SAAS_RUNNER_PYTHON_BIN = os.getenv("SAAS_RUNNER_PYTHON_BIN", sys.executable)
 
