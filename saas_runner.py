@@ -172,6 +172,13 @@ def handle_remove_occlusion(request: dict[str, Any]) -> dict[str, Any]:
     HANDLERS at this function instead.
     Later, this can be changed to be handle_remove_occlusion_rose if we want EraserDiT to be the default and ROSE to be fallback. 
     """
+    """ROSE video-inpainting handler — kept as a fallback.
+
+    "remove_occlusion" is currently wired to handle_remove_occlusion_eraserdit
+    below. To switch back to ROSE, point the "remove_occlusion" entry in
+    HANDLERS at this function instead.
+    Later, this can be changed to be handle_remove_occlusion_rose if we want EraserDiT to be the default and ROSE to be fallback. 
+    """
     script = _require_file(REPO_ROOT / "DataraAI_rose_occlusion.py")
     completed = _run_command(
         [
@@ -191,6 +198,33 @@ def handle_remove_occlusion(request: dict[str, Any]) -> dict[str, Any]:
             str(request["sample_height"]),
             "--sample_width",
             str(request["sample_width"]),
+        ]
+    )
+    stdout = completed.stdout or ""
+    stderr = completed.stderr or ""
+    output_path = _last_non_empty_line(stdout)
+    if completed.returncode != 0:
+        return _result("failed", error=stderr or stdout or "Occlusion removal failed", logs={"stdout": stdout, "stderr": stderr})
+    if not output_path or not Path(output_path).is_file():
+        return _result("failed", error="Occlusion removal completed without an output video", logs={"stdout": stdout, "stderr": stderr})
+    return _result("succeeded", artifacts={"output_path": output_path}, logs={"stdout": stdout, "stderr": stderr})
+
+
+def handle_remove_occlusion_eraserdit(request: dict[str, Any]) -> dict[str, Any]:
+    """EraserDiT video-inpainting handler — current default for "remove_occlusion"."""
+    script = _require_file(REPO_ROOT / "DataraAI_eraserdit_occlusion.py")
+    completed = _run_command(
+        [
+            SAAS_ERASERDIT_PYTHON_BIN,
+            str(script),
+            "--source_video",
+            str(request["source_video"]),
+            "--mask_video",
+            str(request["mask_video"]),
+            "--output_dir",
+            str(request["output_dir"]),
+            "--prompt",
+            str(request["prompt"]),
         ]
     )
     stdout = completed.stdout or ""
@@ -331,6 +365,9 @@ HANDLERS = {
     "generate_corner_case": handle_generate_corner_case,
     "create_vlm_tags": handle_create_vlm_tags,
     "generate_masks": handle_generate_masks,
+    # EraserDiT is the current default; see handle_remove_occlusion above for the
+    # ROSE fallback and how to swap it back in.
+    "remove_occlusion": handle_remove_occlusion_eraserdit,
     # EraserDiT is the current default; see handle_remove_occlusion above for the
     # ROSE fallback and how to swap it back in.
     "remove_occlusion": handle_remove_occlusion_eraserdit,
