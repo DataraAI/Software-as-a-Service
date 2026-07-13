@@ -373,11 +373,10 @@ def main() -> None:
         print(f"OUTPUT_OBJ: {obj_files[0].parent}")
 
         # --- USD animation ---
-        # --- USD animation ---
         usd_out = run_output_dir / f"{args.seq}_hand_animation.usd"
         saas_root = Path("/home/ubuntu/Software-as-a-Service")
         run_in_conda(
-            DYNHAMR_CONDA_ENV,
+            VIPE_CONDA_ENV,
             f"cd '{saas_root}' && python run_hand_mesh_to_usd.py "
             f"--obj-dir '{obj_files[0].parent}' "
             f"--output '{usd_out}' "
