@@ -13,7 +13,7 @@ import tempfile
 import shutil
 import trimesh
 from pathlib import Path
-from pxr import Usd, UsdGeom, UsdLux, UsdUtils
+from pxr import Usd, UsdGeom, UsdLux, UsdUtils, Sdf
 
 logging.basicConfig(
     format="[%(asctime)s] %(message)s",
@@ -62,14 +62,12 @@ def main() -> None:
 
     num_frames = len(frame_numbers)
     
-    # Force the final output string container extension path evaluation to end in .usdz
     final_output_path = Path(args.output).resolve()
     if final_output_path.suffix.lower() != '.usdz':
         final_output_path = final_output_path.with_suffix('.usdz')
 
     log.info("Processing %d frames into temporary binary cache layer...", num_frames)
 
-    # 🌟 STEP 1: Build a temporary raw binary .usdc file structure first
     with tempfile.TemporaryDirectory(prefix="usdz_build_") as tmp_dir:
         tmp_usdc_path = os.path.join(tmp_dir, "hand_mesh_cached.usdc")
         
@@ -114,12 +112,14 @@ def main() -> None:
 
         stage.GetRootLayer().Save()
         
-        # 🌟 STEP 2: Package the binary layout cleanly into the target .usdz zipped asset container
         log.info("Compressing scene graph into target USDZ package asset...")
         os.makedirs(final_output_path.parent, exist_ok=True)
         
-        # OpenUSD packaging helper utility
-        success = UsdUtils.CreateNewUsdzPackage(Path(tmp_usdc_path), str(final_output_path))
+        # =====================================================================
+        # 🌟 FIXED: Explicitly wrap the input path into an Sdf.AssetPath object
+        # =====================================================================
+        input_asset_path = Sdf.AssetPath(tmp_usdc_path)
+        success = UsdUtils.CreateNewUsdzPackage(input_asset_path, str(final_output_path))
         
         if not success or not final_output_path.is_file():
             log.error("Failed to build package via UsdUtils framework.")
