@@ -126,7 +126,6 @@ def main() -> None:
             sys.exit(1)
 
     log.info("Successfully saved package: %s", final_output_path)
-    print(f"OUTPUT_USD: {final_output_path}")
 
 if __name__ == "__main__":
     main()
