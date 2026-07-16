@@ -253,6 +253,8 @@ def handle_generate_task_intelligence(request: dict[str, Any]) -> dict[str, Any]
     )
 
 
+# CHANGED: now passes duration_seconds and fps, uses multi_trajectory,
+# and returns gen3c_output_dir + lyra_ply_dir in addition to vipe_zip
 def handle_generate_video_to_video_views(request: dict[str, Any]) -> dict[str, Any]:
     script = _require_file(REPO_ROOT / "lyra_v2v.py")
     command = [
@@ -262,8 +264,10 @@ def handle_generate_video_to_video_views(request: dict[str, Any]) -> dict[str, A
         str(request["video_url"]),
         "--output_dir",
         str(request["output_dir"]),
-        "--trajectory",
-        str(request.get("trajectory") or "left"),
+        "--duration_seconds",
+        str(request.get("duration_seconds") or 5.0),
+        "--fps",
+        str(request.get("fps") or 24),
     ]
     vipe_zip_url = str(request.get("vipe_zip_url") or "").strip()
     if vipe_zip_url:
@@ -283,8 +287,9 @@ def handle_generate_video_to_video_views(request: dict[str, Any]) -> dict[str, A
     return _result(
         "succeeded",
         artifacts={
-            "video_path": payload.get("gen3c_video"),
-            "vipe_zip_path": payload.get("vipe_zip"),
+            "gen3c_output_dir": payload.get("gen3c_output_dir"),
+            "lyra_ply_dir":     payload.get("lyra_ply_dir"),
+            "vipe_zip_path":    payload.get("vipe_zip"),
         },
         logs={"stdout": stdout, "stderr": stderr},
     )
