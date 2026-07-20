@@ -372,6 +372,18 @@ def main() -> None:
     if obj_files:
         print(f"OUTPUT_OBJ: {obj_files[0].parent}")
 
+        # --- USD animation ---
+        usd_out = run_output_dir / f"{args.seq}_hand_animation.usdz"
+        saas_root = Path("/home/ubuntu/Software-as-a-Service")
+        run_in_conda(
+            VIPE_CONDA_ENV,
+            f"cd '{saas_root}' && python run_hand_mesh_to_usd.py "
+            f"--obj-dir '{obj_files[0].parent}' "
+            f"--output '{usd_out}' "
+            f"--fps {fps}",
+        )
+        print(f"OUTPUT_USD: {usd_out}")
+
     # --- ViPE zip (only when freshly computed, not when restored from blob) ---
     if not args.vipe_zip_url:
         vipe_zip_path = zip_vipe_output(vipe_output)
