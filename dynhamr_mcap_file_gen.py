@@ -91,6 +91,16 @@ def joints_and_video_to_mcap(
     center_offset = np.mean(joints, axis=(0, 1, 2))
     joints_centered = joints - center_offset
 
+    # Camera X (Right)       -> World X (Forward/Red)
+    # Camera Z (Depth Out)   -> World Y (Left-Right/Green)
+    # Camera Y (Downwards)   -> World -Z (Up-Down/Blue inversion)
+    transformed_joints = np.zeros_like(joints_centered)
+    transformed_joints[..., 0] = joints_centered[..., 0]   # New X = Old X
+    transformed_joints[..., 1] = joints_centered[..., 2]   # New Y = Old Z (depth becomes horizontal floor depth)
+    transformed_joints[..., 2] = -joints_centered[..., 1]  # New Z = -Old Y (vertical inversion so up is up)
+    
+    joints_centered = transformed_joints
+
     # --- Load Video Stream ---
     cap = None
     if video_path:
