@@ -85,7 +85,7 @@ def classify(topics):
             buckets["annotations"].append(topic)
         elif RE_SCENE.match(topic) or schema in SCENE_SCHEMAS:
             buckets["scene"].append(topic)
-        elif schema in LOG_SCHEMAS or RE_LOG.search(topic):
+        elif schema in LOG_SCHEMAS or RE_LOG.search(topic) or topic == "/task_status":
             buckets["log"].append(topic)
         elif RE_DEPTH.search(topic):
             buckets["depth"].append(topic)
@@ -158,6 +158,19 @@ def make_3d_config(scene_topics):
         },
         "imageMode": {},
         "foxglovePanelTitle": "3D Workspace View",
+    }
+
+
+def make_log_config(topic, title):
+    return {
+        "topicToRender": topic,
+        "minLogLevel": 1,
+        "searchFilter": "",
+        "showDate": False,
+        "showTimestamps": True,
+        "showThreadId": False,
+        "showNodeName": False,
+        "foxglovePanelTitle": title,
     }
 
 
@@ -283,8 +296,12 @@ def build_layout(topics):
     # 4. Process Captions / Transcripts
     for log_topic in buckets["log"]:
         label = log_topic.strip("/").split("/")[-1].title()
-        pid = panel_id("RosOut")
-        config_by_id[pid] = make_rosout_config(log_topic, label)
+        pid = f"RosOut!{uuid.uuid4().hex[:7]}"
+        config_by_id[pid] = {
+            "topic": log_topic,
+            "preload": True,
+            "foxglovePanelTitle": label
+        }
         bottom_row.append(pid)
 
     # Compile the right pane content tree dynamically
@@ -297,15 +314,19 @@ def build_layout(topics):
         right_sections.append(build_mosaic(bottom_row, "row"))
 
     right_tree = None
-    for section in right_sections:
+    for i, section in enumerate(right_sections):
         if right_tree is None:
             right_tree = section
         else:
+            # Give the text log panel on the bottom row a 25% height ratio
+            is_last = (i == len(right_sections) - 1)
+            split_pct = 75 if is_last and bottom_row else 50
+            
             right_tree = {
                 "direction": "column",
                 "first": right_tree,
                 "second": section,
-                "splitPercentage": 50,
+                "splitPercentage": split_pct,
             }
 
     left_tree = left_col[0] if left_col else None

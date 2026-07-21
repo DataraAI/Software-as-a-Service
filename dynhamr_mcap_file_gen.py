@@ -106,8 +106,16 @@ def joints_and_video_to_mcap(
     if annotations_path:
         annotations_path = Path(annotations_path).expanduser().resolve()
         if annotations_path.is_file():
-            with open(annotations_path, "r") as f:
-                active_annotations = json.load(f)
+            try:
+                with open(annotations_path, "r") as f:
+                    active_annotations = json.load(f)
+                print(f"[+] Loaded {len(active_annotations)} annotation windows from: {annotations_path.name}")
+            except Exception as e:
+                print(f"[!] Error parsing annotations JSON: {e}", file=sys.stderr)
+        else:
+            print(f"[!] Warning: Annotations path provided but file not found: {annotations_path}", file=sys.stderr)
+    else:
+        print("[!] No annotations file provided. Using default fallback message.", file=sys.stderr)
 
     out_path = Path(output_mcap)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,6 +124,24 @@ def joints_and_video_to_mcap(
     last_logged_desc = None
 
     with open(out_path, "wb") as f, Writer(f) as writer:
+        # Force register the topic immediately at t=0 so it appears in the MCAP channels summary
+        init_ts = Timestamp()
+        init_ts.FromNanoseconds(0)
+        init_msg = Log()
+        init_msg.timestamp.CopyFrom(init_ts)
+        init_msg.level = 2  # INFO
+        init_msg.message = "Initializing tracking pipeline log..."
+        init_msg.name = "Video_Analyzer"
+        
+        writer.write_message(
+            topic=log_topic,
+            message=init_msg,
+            log_time=0,
+            publish_time=0,
+            sequence=0,
+        )
+        last_logged_desc = init_msg.message
+        
         for t in range(num_frames):
             log_time_ns = t * dt_ns
             current_time_sec = log_time_ns / 1e9
