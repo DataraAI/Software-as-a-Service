@@ -26,10 +26,6 @@ from mcap.reader import make_reader
 # --------------------------------------------------------------------------
 # Topic classification heuristics
 # --------------------------------------------------------------------------
-# Adjust these patterns to match your pipeline's naming conventions if your
-# topics don't follow the /video/*, /imu/*, /scene/*, /captions convention
-# used in the reference layout.
-
 RE_DEPTH = re.compile(r"depth", re.I)
 RE_ANNOTATIONS = re.compile(r"annotation", re.I)
 RE_RGB = re.compile(r"(rgb|color|video)", re.I)
@@ -58,14 +54,17 @@ def panel_id(kind: str) -> str:
 def read_topics(mcap_path: Path):
     """Return list of (topic, schema_name, message_encoding)."""
     topics = []
-    with open(mcap_path, "rb") as f:
-        reader = make_reader(f)
-        summary = reader.get_summary()
-        if summary is None:
-            return topics
-        for ch in summary.channels.values():
-            schema = summary.schemas.get(ch.schema_id)
-            topics.append((ch.topic, schema.name if schema else "", ch.message_encoding))
+    try:
+        with open(mcap_path, "rb") as f:
+            reader = make_reader(f)
+            summary = reader.get_summary()
+            if summary is None:
+                return topics
+            for ch in summary.channels.values():
+                schema = summary.schemas.get(ch.schema_id)
+                topics.append((ch.topic, schema.name if schema else "", ch.message_encoding))
+    except Exception as e:
+        print(f"[!] Failed to read {mcap_path}: {e}", file=sys.stderr)
     return sorted(topics)
 
 
@@ -77,7 +76,7 @@ def classify(topics):
         "imu": [],
         "scene": [],
         "log": [],
-        "annotations": [],  # topic -> handled separately, attached to image topics
+        "annotations": [],
         "unmatched": [],
     }
 
@@ -101,14 +100,7 @@ def classify(topics):
 
 
 def match_annotations(image_topic: str, annotation_topics: list[str], used: set) -> str | None:
-    """Find the annotation topic that belongs to a given image topic.
-
-    Only matches when the annotation topic is clearly derived from the image
-    topic's own name (e.g. /video/rgb -> /video/rgb_annotations or
-    /video/rgb/annotations), not just a sibling under the same parent dir --
-    that's too loose once there's more than one image topic per parent
-    (e.g. /video/rgb and /video/depth both under /video).
-    """
+    """Find the annotation topic that belongs to a given image topic."""
     stem = image_topic.rstrip("/")
     candidates = {f"{stem}_annotations", f"{stem}/annotations", f"{stem}Annotations"}
     for ann in annotation_topics:
@@ -120,7 +112,7 @@ def match_annotations(image_topic: str, annotation_topics: list[str], used: set)
 
 
 # --------------------------------------------------------------------------
-# Panel config builders (mirroring the structure of the reference layout)
+# Panel config builders (Optimized for side-by-side viewing)
 # --------------------------------------------------------------------------
 
 def make_3d_config(scene_topics):
@@ -138,7 +130,8 @@ def make_3d_config(scene_topics):
             "near": 0.01,
             "far": 50,
         },
-        "followMode": "follow-none",
+        "followMode": "follow-frame",
+        "followFrame": "/scene",
         "scene": {},
         "transforms": {},
         "topics": topics_cfg,
@@ -162,12 +155,9 @@ def make_3d_config(scene_topics):
             "poseTopic": "/move_base_simple/goal",
             "pointTopic": "/clicked_point",
             "poseEstimateTopic": "/initialpose",
-            "poseEstimateXDeviation": 0.5,
-            "poseEstimateYDeviation": 0.5,
-            "poseEstimateThetaDeviation": 0.26179939,
         },
         "imageMode": {},
-        "foxglovePanelTitle": "3D Scene",
+        "foxglovePanelTitle": "3D Workspace View",
     }
 
 
@@ -192,7 +182,7 @@ def make_image_config(image_topic, annotation_topic, title):
             "near": 0.5,
             "far": 5000,
         },
-        "followMode": "follow-pose",
+        "followMode": "follow-none",
         "scene": {},
         "transforms": {},
         "topics": {},
@@ -200,11 +190,6 @@ def make_image_config(image_topic, annotation_topic, title):
         "publish": {
             "type": "point",
             "poseTopic": "/move_base_simple/goal",
-            "pointTopic": "/clicked_point",
-            "poseEstimateTopic": "/initialpose",
-            "poseEstimateXDeviation": 0.5,
-            "poseEstimateYDeviation": 0.5,
-            "poseEstimateThetaDeviation": 0.26179939,
         },
         "foxglovePanelTitle": title,
     }
@@ -214,7 +199,6 @@ PLOT_COLORS = ["#4e98e2", "#f5774d", "#f7df71"]
 
 
 def make_plot_config(base_topic, field_group, title):
-    """field_group is e.g. 'gyro' or 'accel' -> plots .x/.y/.z of that field."""
     paths = [
         {
             "value": f"{base_topic}.{field_group}.{axis}",
@@ -259,16 +243,18 @@ def build_mosaic(panel_ids, direction="row"):
 def build_layout(topics):
     buckets = classify(topics)
     config_by_id = {}
-    left_col = []   # 3D scene
-    top_row = []    # images
-    mid_row = []    # plots
-    bottom_row = [] # logs
+    left_col = []   # 3D workspace panel 
+    top_row = []    # Video/RGB camera panels
+    mid_row = []    # IMU Plot panels
+    bottom_row = [] # Text log/Caption panels
 
+    # 1. Handle 3D Scene Updates (/scene/hands, /scene/camera)
     if buckets["scene"]:
         pid = panel_id("3D")
         config_by_id[pid] = make_3d_config(sorted(buckets["scene"]))
         left_col.append(pid)
 
+    # 2. Process RGB Images and Depth Maps
     annotation_topics = buckets["annotations"]
     used_annotations = set()
     for img_topic in buckets["rgb"] + buckets["depth"]:
@@ -284,6 +270,7 @@ def build_layout(topics):
     for extra in leftover_annotations:
         buckets["unmatched"].append(extra)
 
+    # 3. Process IMU Topics
     for imu_topic in buckets["imu"]:
         base = imu_topic.strip("/").split("/")[-1].title()
         gpid = panel_id("Plot")
@@ -293,13 +280,14 @@ def build_layout(topics):
         config_by_id[apid] = make_plot_config(imu_topic, "accel", f"{base} Accel (m/s²)")
         mid_row.append(apid)
 
+    # 4. Process Captions / Transcripts
     for log_topic in buckets["log"]:
         label = log_topic.strip("/").split("/")[-1].title()
         pid = panel_id("RosOut")
         config_by_id[pid] = make_rosout_config(log_topic, label)
         bottom_row.append(pid)
 
-    # Assemble right-hand column: images row, plots row, logs row
+    # Compile the right pane content tree dynamically
     right_sections = []
     if top_row:
         right_sections.append(build_mosaic(top_row, "row"))
@@ -317,18 +305,18 @@ def build_layout(topics):
                 "direction": "column",
                 "first": right_tree,
                 "second": section,
-                "splitPercentage": 100 / len(right_sections)
-                if len(right_sections) else 50,
+                "splitPercentage": 50,
             }
 
     left_tree = left_col[0] if left_col else None
 
+    # Assemble the final parent layout tree
     if left_tree and right_tree:
         layout = {
             "direction": "row",
             "first": left_tree,
             "second": right_tree,
-            "splitPercentage": 40,
+            "splitPercentage": 55, # 3D panel is given slightly more spacing weight
         }
     elif left_tree:
         layout = left_tree
@@ -372,7 +360,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("paths", nargs="+", help=".mcap files or directories")
     ap.add_argument("--recursive", action="store_true",
-                     help="recurse into directories")
+                    help="recurse into directories")
     args = ap.parse_args()
 
     mcap_files = []
