@@ -309,10 +309,9 @@ def main(argv=None):
     # Done — print JSON result to stdout for the caller to parse
     # ------------------------------------------------------------------
     result = {
-        "gen3c_output_dir": str(gen3c_output_dir),
-        "lyra_ply_dir":     str(lyra_ply_dir),
-        "vipe_zip":         str(vipe_zip),
-    }
+    "gen3c_video":      str(gen3c_output_dir / "rgb" / "input.mp4"),
+    "vipe_zip":         str(vipe_zip),
+}
     print(json.dumps(result))
 
 
