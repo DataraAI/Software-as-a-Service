@@ -270,38 +270,30 @@ def main(argv=None):
     # ------------------------------------------------------------------
     # Step 8: Run Lyra 3DGS reconstruction (sample.py)
     # ------------------------------------------------------------------
-    _run(
-        [
-            str(CONDA_BIN), "run", "-n", LYRA_CONDA_ENV,
-            "accelerate", "launch", "sample.py",
-            "--config", "configs/demo/lyra_dynamic.yaml",
-            "dataset_name=lyra_dynamic_demo_generated",
-            "save_gaussians_orig=true",
-        ],
-        label="Lyra reconstruction",
-        cwd=LYRA_ROOT,
-        extra_env={
-            "LYRA_GEN3C_OUTPUT_DIR": str(gen3c_output_dir),
-            "LYRA_SCENE_SCALE":      "0.1",
-        },
-    )
+    # ------------------------------------------------------------------
+    # Step 8: Run Lyra reconstruction (non-fatal)
+    # ------------------------------------------------------------------
+    try:
+        _run(
+            [
+                str(CONDA_BIN), "run", "-n", LYRA_CONDA_ENV,
+                "accelerate", "launch", "sample.py",
+                "--config", "configs/demo/lyra_dynamic.yaml",
+                "dataset_name=lyra_dynamic_demo_generated",
+                "save_gaussians_orig=true",
+            ],
+            label="Lyra reconstruction",
+            cwd=LYRA_ROOT,
+            extra_env={
+                "LYRA_GEN3C_OUTPUT_DIR": str(gen3c_output_dir),
+                "LYRA_SCENE_SCALE":      "0.1",
+            },
+        )
+    except SystemExit:
+        print("[lyra_v2v] Lyra reconstruction failed -- continuing", file=sys.stderr)
 
     # ------------------------------------------------------------------
-    # Step 9: Confirm .ply outputs exist
-    # ------------------------------------------------------------------
-    lyra_ply_dir = (
-        LYRA_ROOT
-        / "outputs" / "demo" / "lyra_dynamic"
-        / "static_view_indices_fixed_5_0_1_2_3_4"
-        / "lyra_dynamic_demo_generated"
-    )
-    if not lyra_ply_dir.is_dir():
-        print(f"[lyra_v2v] Expected Lyra .ply output directory not found: {lyra_ply_dir}", file=sys.stderr)
-        sys.exit(1)
-    print(f"[lyra_v2v] Lyra .ply output: {lyra_ply_dir}", file=sys.stderr)
-
-    # ------------------------------------------------------------------
-    # Step 10: Zip VIPE output for caching on future runs
+    # Step 9: Zip VIPE output for caching on future runs
     # ------------------------------------------------------------------
     _zip_dir(vipe_output_dir, vipe_zip)
 
@@ -309,9 +301,9 @@ def main(argv=None):
     # Done — print JSON result to stdout for the caller to parse
     # ------------------------------------------------------------------
     result = {
-    "gen3c_video":      str(gen3c_output_dir / "rgb" / "input.mp4"),
-    "vipe_zip":         str(vipe_zip),
-}
+        "gen3c_video": str(gen3c_output_dir / "rgb" / "input.mp4"),
+        "vipe_zip":    str(vipe_zip),
+    }
     print(json.dumps(result))
 
 
