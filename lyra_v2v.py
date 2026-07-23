@@ -114,8 +114,8 @@ def _compute_num_video_frames(duration_seconds: float, fps: int) -> int:
     Must satisfy (N - 1) % 120 == 0 → 121, 241, 361, 481, 601, 721...
     """
     target = int(duration_seconds * fps)
-    N = max(1, round((target - 1) / 120))
-    num_frames = 120 * N + 1
+    N = max(1, round(target / 121))
+    num_frames = 121 * N
     actual_duration = (num_frames - 1) / fps
     print(f"[lyra_v2v] Requested: {duration_seconds}s @ {fps}fps = {target} frames", file=sys.stderr)
     print(f"[lyra_v2v] Using:     num_video_frames={num_frames} ({actual_duration:.2f}s)", file=sys.stderr)
