@@ -12,7 +12,8 @@ Usage:
         --output_dir <DIR> \
         [--vipe_zip_url <ZIP_SAS_URL>] \
         [--duration_seconds 5.0] \
-        [--fps 24]
+        [--fps 24] \
+        [--trajectory left]
 
 Prints a single JSON line to stdout on success:
     {
@@ -161,6 +162,9 @@ def main(argv=None):
                         help="Target output duration in seconds (default: 5.0)")
     parser.add_argument("--fps",              type=int, default=24,
                         help="FPS of the input video (default: 24)")
+    # ADDED BACK: trajectory for single-trajectory generation
+    parser.add_argument("--trajectory",       type=str, default="left",
+                        help="Camera trajectory (left/right/up/down/zoom_in/zoom_out)")
     args = parser.parse_args(argv)
 
     output_dir       = Path(args.output_dir).resolve()
@@ -237,7 +241,7 @@ def main(argv=None):
     _patch_lyra_yaml(LYRA_ROOT, bullet_times)
 
     # ------------------------------------------------------------------
-    # Step 7: Run Lyra Gen3C (multi-trajectory, with num_video_frames)
+    # Step 7: Run Lyra Gen3C (single trajectory, with num_video_frames)
     # ------------------------------------------------------------------
     lyra_conda_prefix = MINICONDA_ROOT / "envs" / LYRA_CONDA_ENV
     gen3c_bash_cmd = (
@@ -253,7 +257,7 @@ def main(argv=None):
         f"--num_video_frames {num_video_frames} "
         f"--fps {args.fps} "
         f"--foreground_masking "
-        f"--multi_trajectory "
+        f"--trajectory {args.trajectory} "
         f"--center_depth_quantile"
     )
     _run(
@@ -264,7 +268,6 @@ def main(argv=None):
 
     # ------------------------------------------------------------------
     # Step 8: Run Lyra 3DGS reconstruction (sample.py)
-    # env vars tell registry.py where GEN3C output lives
     # ------------------------------------------------------------------
     _run(
         [
