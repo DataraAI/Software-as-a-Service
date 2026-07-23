@@ -369,7 +369,7 @@ def main() -> None:
             mcap_cmd += f"--annotations '{dummy_annotations}' "
 
         run_in_conda(DYNHAMR_CONDA_ENV, mcap_cmd)
-        print(f"OUPUT_MCAP: {mcap_out}")
+        print(f"OUTPUT_MCAP: {mcap_out}")
         layout_cmd = (
             f"cd /home/ubuntu/Software-as-a-Service && python generate_layout.py "
             f"'{mcap_out}'"
