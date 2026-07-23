@@ -246,7 +246,7 @@ def main(argv=None):
     lyra_conda_prefix = MINICONDA_ROOT / "envs" / LYRA_CONDA_ENV
     gen3c_bash_cmd = (
         f"TORCHDYNAMO_DISABLE=1 " 
-        f"CUDA_HOME={lyra_conda_prefix} "
+        f"CUDA_HOME={lyra_conda_prefix} "w
         f"PYTHONPATH={LYRA_ROOT} "
         f"torchrun --nproc_per_node=1 "
         f"cosmos_predict1/diffusion/inference/gen3c_dynamic_sdg.py "
