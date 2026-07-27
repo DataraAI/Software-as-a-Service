@@ -354,13 +354,30 @@ def main() -> None:
         npz_file = npz_files[0]
         print(f"OUTPUT_NPZ: {npz_file}")
         mcap_out = npz_file.parent / f"{args.seq}.mcap"
-        run_in_conda(DYNHAMR_CONDA_ENV,
+
+        # REPLACE THIS WITH ACTUAL ANNOTATIONS FILE PATH
+        dummy_annotations = '/home/ubuntu/packages/Dyn-HaMR/dyn-hamr/annotations.json'
+
+        mcap_cmd = (
             f"cd /home/ubuntu/Software-as-a-Service && python dynhamr_mcap_file_gen.py "
             f"'{npz_file}' "
-            f"-o '{mcap_out}' "
-            f"--fps {fps}"
+            f"--video '{video_path}' "
+            f"--o '{mcap_out}' "
+            f"--fps {fps} "
         )
+        if Path(dummy_annotations).is_file():
+            mcap_cmd += f"--annotations '{dummy_annotations}' "
+
+        run_in_conda(DYNHAMR_CONDA_ENV, mcap_cmd)
         print(f"OUTPUT_MCAP: {mcap_out}")
+        layout_cmd = (
+            f"cd /home/ubuntu/Software-as-a-Service && python generate_layout.py "
+            f"'{mcap_out}'"
+        )
+        run_in_conda(DYNHAMR_CONDA_ENV, layout_cmd)
+        layout_out = mcap_out.parent / f"{args.seq}.layout.json"
+        print(f"OUTPUT_LAYOUT: {layout_out}")
+
     else:
         log.warning("No joints_world.npz found under %s", run_output_dir)
 
