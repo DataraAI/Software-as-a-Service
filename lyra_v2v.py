@@ -1,50 +1,69 @@
 """
-lyra_v2v.py — VIPE + Lyra Gen3C video-to-video pipeline
+lyra_v2v.py — VIPE + Lyra Gen3C + Lyra Reconstruction + Isaac Sim USD pipeline
 
 Runs on the Lambda VM. Downloads an input video from a SAS URL, runs it through
 VIPE (vipe conda env), then feeds the VIPE output into Lyra Gen3C (lyra-v2v conda
-env) to synthesise alternative camera views.
+env) to synthesise alternative camera views, runs Lyra 3DGS reconstruction to
+produce .ply Gaussian Splat files, then runs the Isaac Sim USD pipeline.
 
 Usage:
     python3 lyra_v2v.py --video_url <SAS_URL> --output_dir <DIR> [--vipe_zip_url <ZIP_SAS_URL>]
 
 Prints a single JSON line to stdout on success:
-    {"gen3c_video": "/abs/path/gen3c_output/0/rgb/input.mp4", "vipe_zip": "/abs/path/vipe_output.zip"}
+    {
+        "gen3c_video":  "/abs/path/gen3c_output/rgb/input.mp4",
+        "vipe_zip":     "/abs/path/vipe_output.zip",
+        "lyra_ply_zip": "/abs/path/lyra_ply_output.zip",
+        "output_usd":   "/abs/path/scene.usd"
+    }
 
-All progress and subprocess output is written to stderr so stdout stays clean for
-the JSON result that the caller parses.
+All progress and subprocess output is written to stderr so stdout stays clean.
 """
 
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
-from urllib.parse import urlparse
 
 import requests
 
 
 # ---------------------------------------------------------------------------
-# Path constants — all overridable via environment variables so the script
-# works on any machine layout without edits.
+# Path constants
 # ---------------------------------------------------------------------------
-MINICONDA_ROOT = Path(os.getenv("SAAS_MINICONDA_ROOT", Path.home()/"miniconda3"))
-CONDA_BIN      = MINICONDA_ROOT/"bin"/"conda"
-VIPE_ROOT      = Path(os.getenv("VIPE_ROOT",  Path.home()/"packages"/"vipe"))
-LYRA_ROOT      = Path(os.getenv("LYRA_ROOT",  Path.home()/"packages"/"lyra" / "Lyra-1"))
+MINICONDA_ROOT = Path(os.getenv("SAAS_MINICONDA_ROOT", Path.home() / "miniconda3"))
+CONDA_BIN      = MINICONDA_ROOT / "bin" / "conda"
+VIPE_ROOT      = Path(os.getenv("VIPE_ROOT",  Path.home() / "packages" / "vipe"))
+LYRA_ROOT      = Path(os.getenv("LYRA_ROOT",  Path.home() / "packages" / "lyra" / "Lyra-1"))
 LYRA_CONDA_ENV = os.getenv("LYRA_CONDA_ENV", "lyra-v2v")
 VIPE_CONDA_ENV = os.getenv("VIPE_CONDA_ENV", "vipe")
+LYRA_BRANCH    = os.getenv("LYRA_BRANCH", "full-sim")
+SAAS_ROOT      = Path(__file__).resolve().parent
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _ensure_lyra_branch(lyra_root: Path, branch: str = LYRA_BRANCH) -> None:
+    print(f"[lyra_v2v] Checking out Lyra branch: {branch}", file=sys.stderr)
+    result = subprocess.run(
+        ["git", "checkout", branch],
+        cwd=str(lyra_root),
+        stdout=sys.stderr,
+        stderr=sys.stderr,
+    )
+    if result.returncode != 0:
+        print(f"[lyra_v2v] Failed to checkout branch {branch}", file=sys.stderr)
+        sys.exit(result.returncode)
+    print(f"[lyra_v2v] Lyra branch confirmed: {branch}", file=sys.stderr)
+
+
 def _download(url: str, dest: Path, label: str = "file", timeout: int = 30) -> None:
-    """Stream-download a URL to dest, following the same pattern as post_annotation.py."""
     print(f"[lyra_v2v] Downloading {label}...", file=sys.stderr)
     with requests.get(url, stream=True, timeout=timeout) as r:
         r.raise_for_status()
@@ -56,7 +75,6 @@ def _download(url: str, dest: Path, label: str = "file", timeout: int = 30) -> N
 
 
 def _zip_dir(source_dir: Path, zip_path: Path) -> None:
-    """Zip source_dir so that the archive root is source_dir's name (e.g. vipe_output/)."""
     print(f"[lyra_v2v] Zipping {source_dir} -> {zip_path}", file=sys.stderr)
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for file in source_dir.rglob("*"):
@@ -64,8 +82,8 @@ def _zip_dir(source_dir: Path, zip_path: Path) -> None:
                 zf.write(file, file.relative_to(source_dir.parent))
 
 
-def _run(args_list: list, label: str, cwd: Path | None = None, extra_env: dict | None = None) -> None:
-    """Run a subprocess, streaming output to stderr. Raises on non-zero exit."""
+def _run(args_list: list, label: str, cwd: Path | None = None,
+         extra_env: dict | None = None) -> None:
     env = os.environ.copy()
     if extra_env:
         env.update(extra_env)
@@ -83,38 +101,64 @@ def _run(args_list: list, label: str, cwd: Path | None = None, extra_env: dict |
     print(f"[lyra_v2v] {label} completed successfully", file=sys.stderr)
 
 
+def _patch_lyra_yaml(lyra_root: Path, lyra_out_dir: Path) -> None:
+    """Patch lyra_dynamic.yaml with per-job output directory."""
+    yaml_path = lyra_root / "configs" / "demo" / "lyra_dynamic.yaml"
+    with open(yaml_path, "r") as f:
+        content = f.read()
+    content = re.sub(
+        r"out_dir_inference:.*",
+        f"out_dir_inference: {lyra_out_dir}",
+        content
+    )
+    with open(yaml_path, "w") as f:
+        f.write(content)
+    print(f"[lyra_v2v] Patched lyra_dynamic.yaml: out_dir_inference={lyra_out_dir}", file=sys.stderr)
+
+
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="VIPE + Lyra Gen3C video-to-video pipeline")
+    parser = argparse.ArgumentParser(
+        description="VIPE + Lyra Gen3C + Lyra Reconstruction + Isaac Sim USD pipeline"
+    )
     parser.add_argument("--video_url",    type=str, required=True)
     parser.add_argument("--output_dir",   type=str, required=True)
     parser.add_argument("--vipe_zip_url", type=str, default=None)
-    parser.add_argument("--trajectory", type=str, default="left", choices=["up", "down", "left", "right", "zoom_in", "zoom_out"])
+    parser.add_argument("--trajectory",   type=str, default="left",
+                        choices=["up", "down", "left", "right", "zoom_in", "zoom_out"])
     args = parser.parse_args(argv)
 
-    output_dir      = Path(args.output_dir).resolve()
-    input_video     = output_dir/"input.mp4"
-    vipe_output_dir = output_dir/"vipe_output"
-    vipe_zip        = output_dir/"vipe_output.zip"
-    gen3c_output_dir = output_dir/"gen3c_output"
+    output_dir       = Path(args.output_dir).resolve()
+    input_video      = output_dir / "input.mp4"
+    vipe_output_dir  = output_dir / "vipe_output"
+    vipe_zip         = output_dir / "vipe_output.zip"
+    gen3c_output_dir = output_dir / "gen3c_output"
+    lyra_out_dir     = output_dir / "lyra_output"
+    lyra_ply_zip     = output_dir / "lyra_ply_output.zip"
+    output_usd       = output_dir / "scene.usd"
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
-    # Step 1: Download input video from Azure SAS URL
+    # Step 1: Ensure Lyra repo is on the correct branch
+    # ------------------------------------------------------------------
+    _ensure_lyra_branch(LYRA_ROOT)
+
+    # ------------------------------------------------------------------
+    # Step 2: Download input video
     # ------------------------------------------------------------------
     _download(args.video_url, input_video, label="input video")
 
     # ------------------------------------------------------------------
-    # Step 2: Restore VIPE output from cache, or run VIPE fresh
+    # Step 3: Restore VIPE from cache or run fresh
     # ------------------------------------------------------------------
     vipe_from_cache = False
 
     if args.vipe_zip_url:
-        cached_zip = output_dir/"vipe_output_cached.zip"
+        cached_zip = output_dir / "vipe_output_cached.zip"
         try:
             _download(args.vipe_zip_url, cached_zip, label="cached VIPE zip")
             import zipfile as _zf
@@ -124,9 +168,11 @@ def main(argv=None):
                 print("[lyra_v2v] VIPE output restored from cache", file=sys.stderr)
                 vipe_from_cache = True
             else:
-                print("[lyra_v2v] Cache zip extracted but vipe_output/ missing — falling back to fresh VIPE", file=sys.stderr)
+                print("[lyra_v2v] Cache zip extracted but vipe_output/ missing "
+                      "-- falling back to fresh VIPE", file=sys.stderr)
         except Exception as exc:
-            print(f"[lyra_v2v] VIPE cache restore failed ({exc}) — falling back to fresh VIPE", file=sys.stderr)
+            print(f"[lyra_v2v] VIPE cache restore failed ({exc}) "
+                  "-- falling back to fresh VIPE", file=sys.stderr)
         finally:
             if cached_zip.exists():
                 cached_zip.unlink()
@@ -144,7 +190,7 @@ def main(argv=None):
         )
 
     # ------------------------------------------------------------------
-    # Step 3: Locate the VIPE output video expected by Gen3C
+    # Step 4: Locate VIPE output video
     # ------------------------------------------------------------------
     vipe_rgb_mp4 = vipe_output_dir / "rgb" / "input.mp4"
     if not vipe_rgb_mp4.is_file():
@@ -153,9 +199,12 @@ def main(argv=None):
     print(f"[lyra_v2v] VIPE output: {vipe_rgb_mp4}", file=sys.stderr)
 
     # ------------------------------------------------------------------
-    # Step 4: Run Lyra Gen3C
-    # CUDA_HOME and PYTHONPATH are set inline inside bash -c so they
-    # resolve correctly within the lyra-v2v conda environment.
+    # Step 5: Patch lyra_dynamic.yaml with per-job output dir
+    # ------------------------------------------------------------------
+    _patch_lyra_yaml(LYRA_ROOT, lyra_out_dir)
+
+    # ------------------------------------------------------------------
+    # Step 6: Run Lyra Gen3C (original command, unchanged)
     # ------------------------------------------------------------------
     lyra_conda_prefix = MINICONDA_ROOT / "envs" / LYRA_CONDA_ENV
     gen3c_bash_cmd = (
@@ -178,7 +227,7 @@ def main(argv=None):
     )
 
     # ------------------------------------------------------------------
-    # Step 5: Locate the Gen3C output video
+    # Step 7: Locate Gen3C output video
     # ------------------------------------------------------------------
     gen3c_output_video = gen3c_output_dir / "rgb" / "input.mp4"
     if not gen3c_output_video.is_file():
@@ -187,16 +236,70 @@ def main(argv=None):
     print(f"[lyra_v2v] Gen3C output: {gen3c_output_video}", file=sys.stderr)
 
     # ------------------------------------------------------------------
-    # Step 6: Zip the VIPE output directory for caching on future runs
+    # Step 8: Run Lyra reconstruction (sample.py) -- NEW
+    # ------------------------------------------------------------------
+    _run(
+        [
+            str(CONDA_BIN), "run", "-n", LYRA_CONDA_ENV,
+            "accelerate", "launch", "sample.py",
+            "--config", "configs/demo/lyra_dynamic.yaml",
+            "dataset_name=lyra_dynamic_demo_generated",
+            "save_gaussians_orig=true",
+        ],
+        label="Lyra reconstruction",
+        cwd=LYRA_ROOT,
+        extra_env={
+            "LYRA_GEN3C_OUTPUT_DIR": str(gen3c_output_dir),
+            "LYRA_SCENE_SCALE":      "0.1",
+        },
+    )
+
+    # ------------------------------------------------------------------
+    # Step 9: Locate .ply output and zip it -- NEW
+    # ------------------------------------------------------------------
+    lyra_ply_dir = (
+        lyra_out_dir
+        / "static_view_indices_fixed_5_0_1_2_3_4"
+        / "lyra_dynamic_demo_generated"
+    )
+    if not lyra_ply_dir.is_dir():
+        print(f"[lyra_v2v] Expected Lyra .ply output not found: {lyra_ply_dir}", file=sys.stderr)
+        sys.exit(1)
+    print(f"[lyra_v2v] Lyra .ply output: {lyra_ply_dir}", file=sys.stderr)
+    _zip_dir(lyra_ply_dir, lyra_ply_zip)
+
+    # ------------------------------------------------------------------
+    # Step 10: Run Isaac Sim USD pipeline -- NEW
+    # ------------------------------------------------------------------
+    _run(
+        [
+            str(CONDA_BIN), "run", "-n", LYRA_CONDA_ENV,
+            "python3", str(SAAS_ROOT / "run_lyra_to_isaacsim.py"),
+            "--ply_zip",    str(lyra_ply_zip),
+            "--output_dir", str(output_dir / "isaacsim"),
+            "--output_usd", str(output_usd),
+        ],
+        label="Isaac Sim USD pipeline",
+        cwd=SAAS_ROOT,
+    )
+
+    if not output_usd.exists():
+        print(f"[lyra_v2v] Expected USD output not found: {output_usd}", file=sys.stderr)
+        sys.exit(1)
+
+    # ------------------------------------------------------------------
+    # Step 11: Zip VIPE output for caching (same as original)
     # ------------------------------------------------------------------
     _zip_dir(vipe_output_dir, vipe_zip)
 
     # ------------------------------------------------------------------
-    # Done — print JSON result to stdout for the caller to parse
+    # Done — print JSON result
     # ------------------------------------------------------------------
     result = {
-        "gen3c_video": str(gen3c_output_video),
-        "vipe_zip":    str(vipe_zip),
+        "gen3c_video":  str(gen3c_output_video),
+        "vipe_zip":     str(vipe_zip),
+        "lyra_ply_zip": str(lyra_ply_zip),
+        "output_usd":   str(output_usd),
     }
     print(json.dumps(result))
 
