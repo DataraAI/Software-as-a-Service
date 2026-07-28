@@ -102,19 +102,29 @@ def _run(args_list: list, label: str, cwd: Path | None = None,
 
 
 def _patch_lyra_yaml(lyra_root: Path, lyra_out_dir: Path) -> None:
-    """Patch lyra_dynamic.yaml with per-job output directory."""
     yaml_path = lyra_root / "configs" / "demo" / "lyra_dynamic.yaml"
+    bullet_times = list(range(0, 121, 6))  # [0, 6, 12, ..., 120] = 21 bullet times
+    target_str = str(bullet_times).replace(" ", "")
+
     with open(yaml_path, "r") as f:
         content = f.read()
+
     content = re.sub(
         r"out_dir_inference:.*",
         f"out_dir_inference: {lyra_out_dir}",
         content
     )
+    content = re.sub(
+        r"target_index_manual:.*",
+        f"target_index_manual: {target_str}",
+        content
+    )
+
     with open(yaml_path, "w") as f:
         f.write(content)
-    print(f"[lyra_v2v] Patched lyra_dynamic.yaml: out_dir_inference={lyra_out_dir}", file=sys.stderr)
 
+    print(f"[lyra_v2v] Patched lyra_dynamic.yaml: out_dir_inference={lyra_out_dir}, "
+          f"{len(bullet_times)} bullet times", file=sys.stderr)
 
 # ---------------------------------------------------------------------------
 # Pipeline
