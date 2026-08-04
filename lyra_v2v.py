@@ -48,6 +48,61 @@ SAAS_ROOT      = Path(__file__).resolve().parent
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _ensure_cuda_available() -> None:
+    """If CUDA not detected, search for installation and set env vars
+    so all subprocesses (GEN3C torchrun, sample.py) can use the GPU."""
+    cuda_ok = subprocess.run(
+        [str(CONDA_BIN), "run", "-n", LYRA_CONDA_ENV,
+         "python", "-c", "import torch; exit(0 if torch.cuda.is_available() else 1)"],
+        capture_output=True
+    ).returncode == 0
+
+    if cuda_ok:
+        print("[lyra_v2v] CUDA available — OK", file=sys.stderr)
+        return
+
+    print("[lyra_v2v] CUDA not detected — searching...", file=sys.stderr)
+
+    # Search known CUDA locations on Lambda VM (Ubuntu 24, aarch64 GH200)
+    cuda_candidates = [
+        MINICONDA_ROOT / "envs" / LYRA_CONDA_ENV,
+        Path("/usr/local/cuda"),
+        Path("/usr/local/cuda-12.8"),
+        Path("/usr/local/cuda-12"),
+        Path("/opt/cuda"),
+    ]
+
+    found_cuda = None
+    for path in cuda_candidates:
+        if (path / "bin" / "nvcc").exists() or (path / "lib64").exists():
+            found_cuda = path
+            break
+
+    torch_lib = (
+        MINICONDA_ROOT / "envs" / LYRA_CONDA_ENV
+        / "lib" / "python3.10" / "site-packages" / "torch" / "lib"
+    )
+
+    ld_parts = []
+    if found_cuda:
+        print(f"[lyra_v2v] Found CUDA at: {found_cuda}", file=sys.stderr)
+        os.environ["CUDA_HOME"] = str(found_cuda)
+        os.environ["PATH"] = str(found_cuda / "bin") + ":" + os.environ.get("PATH", "")
+        for lib_dir in ["lib64", "lib"]:
+            p = found_cuda / lib_dir
+            if p.exists():
+                ld_parts.append(str(p))
+    else:
+        print("[lyra_v2v] WARNING: No CUDA installation found — GPU ops will fail", file=sys.stderr)
+
+    if torch_lib.exists():
+        ld_parts.append(str(torch_lib))
+
+    if ld_parts:
+        os.environ["LD_LIBRARY_PATH"] = (
+            ":".join(ld_parts) + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+        )
+        print(f"[lyra_v2v] LD_LIBRARY_PATH updated", file=sys.stderr)
 
 def _ensure_lyra_branch(lyra_root: Path, branch: str = LYRA_BRANCH) -> None:
     print(f"[lyra_v2v] Checking out Lyra branch: {branch}", file=sys.stderr)
@@ -151,6 +206,7 @@ def _restructure_gen3c_for_lyra(gen3c_output_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def main(argv=None):
+    _ensure_cuda_available()
     parser = argparse.ArgumentParser(
         description="VIPE + Lyra Gen3C + Lyra Reconstruction + Isaac Sim USD pipeline"
     )
