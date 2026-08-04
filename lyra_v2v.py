@@ -103,7 +103,7 @@ def _run(args_list: list, label: str, cwd: Path | None = None,
 
 def _patch_lyra_yaml(lyra_root: Path, lyra_out_dir: Path) -> None:
     yaml_path = lyra_root / "configs" / "demo" / "lyra_dynamic.yaml"
-    bullet_times = list(range(0, 121, 6))  # [0, 6, 12, ..., 120] = 21 bullet times
+    bullet_times = list(range(0, 121, 6))
     target_str = str(bullet_times).replace(" ", "")
 
     with open(yaml_path, "r") as f:
@@ -125,6 +125,26 @@ def _patch_lyra_yaml(lyra_root: Path, lyra_out_dir: Path) -> None:
 
     print(f"[lyra_v2v] Patched lyra_dynamic.yaml: out_dir_inference={lyra_out_dir}, "
           f"{len(bullet_times)} bullet times", file=sys.stderr)
+
+
+def _restructure_gen3c_for_lyra(gen3c_output_dir: Path) -> None:
+    """
+    Single-trajectory GEN3C produces gen3c_output/rgb/, pose/, intrinsics/, latent/
+    Lyra expects gen3c_output/0/, 1/, 2/, 3/, 4/, 5/ (one per camera view)
+    Symlink the same single-trajectory data into all 6 numbered folders.
+    Quality will be lower than multi-trajectory but pipeline will run end-to-end.
+    """
+    print("[lyra_v2v] Restructuring single-trajectory GEN3C output for Lyra...", file=sys.stderr)
+    for i in range(6):
+        numbered_dir = gen3c_output_dir / str(i)
+        numbered_dir.mkdir(exist_ok=True)
+        for subfolder in ["rgb", "pose", "intrinsics", "latent"]:
+            src = gen3c_output_dir / subfolder
+            dst = numbered_dir / subfolder
+            if src.exists() and not dst.exists():
+                dst.symlink_to(src)
+    print("[lyra_v2v] GEN3C output restructured into 6 numbered folders", file=sys.stderr)
+
 
 # ---------------------------------------------------------------------------
 # Pipeline
@@ -214,11 +234,11 @@ def main(argv=None):
     _patch_lyra_yaml(LYRA_ROOT, lyra_out_dir)
 
     # ------------------------------------------------------------------
-    # Step 6: Run Lyra Gen3C (original command, unchanged)
+    # Step 6: Run Lyra Gen3C
     # ------------------------------------------------------------------
     lyra_conda_prefix = MINICONDA_ROOT / "envs" / LYRA_CONDA_ENV
     gen3c_bash_cmd = (
-        f"TORCHDYNAMO_DISABLE=1 "  # ADD THIS
+        f"TORCHDYNAMO_DISABLE=1 "
         f"CUDA_HOME={lyra_conda_prefix} "
         f"PYTHONPATH={LYRA_ROOT} "
         f"torchrun --nproc_per_node=1 "
@@ -247,7 +267,12 @@ def main(argv=None):
     print(f"[lyra_v2v] Gen3C output: {gen3c_output_video}", file=sys.stderr)
 
     # ------------------------------------------------------------------
-    # Step 8: Run Lyra reconstruction (sample.py) -- NEW
+    # Step 7.5: Restructure single-trajectory output for Lyra
+    # ------------------------------------------------------------------
+    _restructure_gen3c_for_lyra(gen3c_output_dir)
+
+    # ------------------------------------------------------------------
+    # Step 8: Run Lyra reconstruction (sample.py)
     # ------------------------------------------------------------------
     _run(
         [
@@ -262,12 +287,12 @@ def main(argv=None):
         extra_env={
             "LYRA_GEN3C_OUTPUT_DIR": str(gen3c_output_dir),
             "LYRA_SCENE_SCALE":      "0.1",
-            "LD_LIBRARY_PATH":       f"/home/ubuntu/miniconda3/envs/{LYRA_CONDA_ENV}/lib/python3.10/site-packages/torch/lib",  # ADD
+            "LD_LIBRARY_PATH":       f"/home/ubuntu/miniconda3/envs/{LYRA_CONDA_ENV}/lib/python3.10/site-packages/torch/lib",
         },
     )
 
     # ------------------------------------------------------------------
-    # Step 9: Locate .ply output and zip it -- NEW
+    # Step 9: Locate .ply output and zip it
     # ------------------------------------------------------------------
     lyra_ply_dir = (
         lyra_out_dir
@@ -281,7 +306,7 @@ def main(argv=None):
     _zip_dir(lyra_ply_dir, lyra_ply_zip)
 
     # ------------------------------------------------------------------
-    # Step 10: Run Isaac Sim USD pipeline -- NEW
+    # Step 10: Run Isaac Sim USD pipeline
     # ------------------------------------------------------------------
     _run(
         [
@@ -300,7 +325,7 @@ def main(argv=None):
         sys.exit(1)
 
     # ------------------------------------------------------------------
-    # Step 11: Zip VIPE output for caching (same as original)
+    # Step 11: Zip VIPE output for caching
     # ------------------------------------------------------------------
     _zip_dir(vipe_output_dir, vipe_zip)
 
