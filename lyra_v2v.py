@@ -343,7 +343,12 @@ def main(argv=None):
         extra_env={
             "LYRA_GEN3C_OUTPUT_DIR": str(gen3c_output_dir),
             "LYRA_SCENE_SCALE":      "0.1",
-            "LD_LIBRARY_PATH":       f"/home/ubuntu/miniconda3/envs/{LYRA_CONDA_ENV}/lib/python3.10/site-packages/torch/lib",
+            "TORCHDYNAMO_DISABLE":   "1",
+            "CUDA_HOME":             str(MINICONDA_ROOT / "envs" / LYRA_CONDA_ENV),
+            "LD_LIBRARY_PATH": (
+                f"{MINICONDA_ROOT}/envs/{LYRA_CONDA_ENV}/lib/python3.10/site-packages/torch/lib"
+                + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+            ),
         },
     )
 
