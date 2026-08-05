@@ -332,7 +332,7 @@ def main(argv=None):
     # ------------------------------------------------------------------
     _run(
         [
-            str(CONDA_BIN), "run", "-n", LYRA_CONDA_ENV,
+            str(CONDA_BIN), "run", "-n", "lyra",
             "accelerate", "launch", "sample.py",
             "--config", "configs/demo/lyra_dynamic.yaml",
             "dataset_name=lyra_dynamic_demo_generated",
@@ -344,9 +344,9 @@ def main(argv=None):
             "LYRA_GEN3C_OUTPUT_DIR": str(gen3c_output_dir),
             "LYRA_SCENE_SCALE":      "0.1",
             "TORCHDYNAMO_DISABLE":   "1",
-            "CUDA_HOME":             str(MINICONDA_ROOT / "envs" / LYRA_CONDA_ENV),
+            "CUDA_HOME":             str(MINICONDA_ROOT / "envs" / "lyra"),
             "LD_LIBRARY_PATH": (
-                f"{MINICONDA_ROOT}/envs/{LYRA_CONDA_ENV}/lib/python3.10/site-packages/torch/lib"
+                f"{MINICONDA_ROOT}/envs/lyra/lib/python3.10/site-packages/torch/lib"
                 + ":" + os.environ.get("LD_LIBRARY_PATH", "")
             ),
         },
